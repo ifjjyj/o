@@ -1,0 +1,262 @@
+a: &a {type: url-test, interval: 300, tolerance: 50, url: 'https://www.gstatic.com/generate_204'}
+j: &j {type: http, interval: 86400, override: { client-fingerprint: chrome }, health-check: { enable: true, url: https://www.gstatic.com/generate_204, interval: 300 } }
+s: &s {type: select, proxies: ["at", "us", "hk", "jp", "tw", "sg", "rm", "kr", "DIRECT"]}
+r: &r {type: select, proxies: ["rm", "us", "jp", "at", "hk", "tw", "sg", "kr"]}
+p: &p [exx, fjj, bxx, ouu, ovv, xxg]
+d: &d {type: http, format: mrs, interval: 86400, behavior: domain}
+i: &i {type: http, format: mrs, interval: 86400, behavior: ipcidr}
+
+proxy-providers:
+  bxx: { <<: *j, url: "https://bxx.xx.kg:296/a?format=clash", path: ./bxx.yaml }
+  ouu: { <<: *j, url: "https://ouu.xx.kg:296/a?format=clash", path: ./ouu.yaml }
+  fjj: { <<: *j, url: "https://fjj.xx.kg:296/a?format=clash", path: ./fjj.yaml }
+  xxg: { <<: *j, url: "https://xxg.xx.kg:296/a?format=clash", path: ./xxg.yaml }
+  ovv: { <<: *j, url: "https://ovv.xx.kg:296/a?format=clash", path: ./ovv.yaml }
+  exx: { <<: *j, url: "https://exx.xx.kg:296/a?format=clash", path: ./exx.yaml }
+
+port: 8080
+socks-port: 1080
+mixed-port: 7890
+redir-port: 7891
+tproxy-port: 7892
+allow-lan: true
+bind-address: "*"
+mode: rule
+log-level: warning
+ipv6: true
+external-controller: 0.0.0.0:9090
+external-ui: "ui"
+secret: "14285700"
+unified-delay: true
+tcp-concurrent: true
+find-process-mode: off
+keep-alive-interval: 1800
+profile: { store-selected: true, store-fake-ip: true }
+
+sniffer:
+  enable: true
+  parse-pure-ip: true
+  sniff: {HTTP: {ports: [80, 8080-8880], override-destination: false}, TLS: {ports: [443, 8443]}, QUIC: {ports: [443, 8443]}}
+  skip-domain: ["Mijia Cloud", "+.push.apple.com", "+.apple.com", "+.baidu.com", "+.qq.com", "+.gtimg.com"]
+
+tun: {enable: true, stack: mixed, device: utun, auto-route: true, auto-detect-interface: true, dns-hijack: [any:53], mtu: 1500, gso: true, gro: true, strict-route: true, endpoint-independent-nat: true, udp-timeout: 300}
+
+dns:
+  enable: true
+  listen: 0.0.0.0:1053
+  ipv6: true
+  cache-algorithm: arc
+  use-hosts: true
+  use-system-hosts: true
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+  fake-ip-filter: ["*.lan", "*.local", "*.home", "*.arpa", "+.localdomain", "10.0.0.1", "+.miui.com", "+.xiaomi.com", "+.music.163.com","+.msftconnecttest.com","+.msftncsi.com","+.localhost.ptlogin2.qq.com"]
+  prefer-h3: true
+  default-nameserver: [223.5.5.5, 119.29.29.29]
+  proxy-server-nameserver: [223.5.5.5, 119.29.29.29]
+  nameserver: [https://dns.google/dns-query, https://cloudflare-dns.com/dns-query]
+  nameserver-policy:
+    "+.lan,+.local,+.home,+.arpa,rule-set:private": "10.0.0.1"
+    "+.miui.com,+.xiaomi.com,+.music.163.com,+.msftconnecttest.com,+.msftncsi.com,+.localhost.ptlogin2.qq.com": [223.5.5.5, 119.29.29.29]
+    "rule-set:cn": [223.5.5.5, 119.29.29.29, 223.6.6.6]
+
+proxy-groups:
+  - {name: "hk", <<: *a, filter: "(?i)港|hk|hongkong|hong kong", use: *p}
+  - {name: "tw", <<: *a, filter: "(?i)台|tw|taiwan", use: *p}
+  - {name: "sg", <<: *a, filter: "(?i)新|sg|singapore", use: *p}
+  - {name: "jp", <<: *a, filter: "(?i)日|jp|japan", use: *p}
+  - {name: "kr", <<: *a, filter: "(?i)韩|kr|korea", use: *p}
+  - {name: "us", <<: *a, filter: "(?i)美|us|unitedstates|united states", use: *p}
+  - {name: "rm", <<: *a, filter: "(?i)美|us|unitedstates|united states", use: [bxx], dialer-proxy: "hk"}
+  - {name: "at", <<: *a, use: *p}
+  - {name: "mt", <<: *s}
+  - {name: "openai", <<: *r}
+  - {name: "claude", <<: *r}
+  - {name: "gemini", <<: *r}
+  - {name: "huggingface", <<: *r}
+  - {name: "notionai", <<: *r}
+  - {name: "ai-general", <<: *s}
+  - {name: "google", <<: *s}
+  - {name: "youtube", <<: *s}
+  - {name: "netflix", <<: *s}
+  - {name: "disney", <<: *s}
+  - {name: "hbo", <<: *s}
+  - {name: "hulu", <<: *s}
+  - {name: "primevideo", <<: *s}
+  - {name: "appletv", <<: *s}
+  - {name: "twitch", <<: *s}
+  - {name: "tiktok", <<: *s}
+  - {name: "bilibili-intl", <<: *s}
+  - {name: "spotify", <<: *s}
+  - {name: "applemusic", <<: *s}
+  - {name: "soundcloud", <<: *s}
+  - {name: "tidal", <<: *s}
+  - {name: "telegram", <<: *s}
+  - {name: "twitter", <<: *s}
+  - {name: "facebook", <<: *s}
+  - {name: "instagram", <<: *s}
+  - {name: "whatsapp", <<: *s}
+  - {name: "reddit", <<: *s}
+  - {name: "discord", <<: *s}
+  - {name: "pinterest", <<: *s}
+  - {name: "linkedin", <<: *s}
+  - {name: "steam", <<: *s}
+  - {name: "epic", <<: *s}
+  - {name: "xbox", <<: *s}
+  - {name: "playstation", <<: *s}
+  - {name: "nintendo", <<: *s}
+  - {name: "roblox", <<: *s}
+  - {name: "blizzard", <<: *s}
+  - {name: "ea", <<: *s}
+  - {name: "github", <<: *s}
+  - {name: "docker", <<: *s}
+  - {name: "gitlab", <<: *s}
+  - {name: "oracle", <<: *s}
+  - {name: "aws", <<: *s}
+  - {name: "digitalocean", <<: *s}
+  - {name: "speedtest", <<: *s}
+  - {name: "paypal", <<: *s}
+  - {name: "stripe", <<: *r}
+  - {name: "protonmail", <<: *s}
+  - {name: "onedrive", <<: *s}
+  - {name: "microsoft", <<: *s}
+  - {name: "apple", <<: *s}
+  - {name: "cloudflare", <<: *s}
+  - {name: "category-dev", <<: *s}
+  - {name: "yu", <<: *s}
+
+rules:
+  - AND,((NETWORK,UDP),(DST-PORT,443)),REJECT
+  - DOMAIN-SUFFIX,xx.kg,DIRECT
+  - DOMAIN-SUFFIX,cloudcone.com.cn,DIRECT
+  - IP-CIDR,34.96.149.47/32,DIRECT,no-resolve
+  - IP-CIDR,34.104.181.174/32,DIRECT,no-resolve
+  - IP-CIDR,35.187.250.68/32,DIRECT,no-resolve
+  - IP-CIDR,35.212.189.51/32,DIRECT,no-resolve
+  - IP-CIDR,35.187.250.68/32,DIRECT,no-resolve
+  - IP-CIDR,74.48.192.82/32,DIRECT,no-resolve
+  - RULE-SET,private,DIRECT
+  - RULE-SET,ads,REJECT
+  - RULE-SET,private_ip,DIRECT
+  - RULE-SET,openai,openai
+  - RULE-SET,anthropic,claude
+  - RULE-SET,gemini,gemini
+  - RULE-SET,huggingface,huggingface
+  - RULE-SET,notion,notionai
+  - RULE-SET,ai-general,ai-general
+  - RULE-SET,youtube,youtube
+  - RULE-SET,netflix,netflix
+  - RULE-SET,disney,disney
+  - RULE-SET,hbo,hbo
+  - RULE-SET,hulu,hulu
+  - RULE-SET,primevideo,primevideo
+  - RULE-SET,appletv,appletv
+  - RULE-SET,twitch,twitch
+  - RULE-SET,tiktok,tiktok
+  - RULE-SET,bilibili-intl,bilibili-intl
+  - RULE-SET,spotify,spotify
+  - RULE-SET,applemusic,applemusic
+  - RULE-SET,soundcloud,soundcloud
+  - RULE-SET,tidal,tidal
+  - RULE-SET,telegram,telegram
+  - RULE-SET,twitter,twitter
+  - RULE-SET,facebook,facebook
+  - RULE-SET,instagram,instagram
+  - RULE-SET,whatsapp,whatsapp
+  - RULE-SET,reddit,reddit
+  - RULE-SET,discord,discord
+  - RULE-SET,pinterest,pinterest
+  - RULE-SET,linkedin,linkedin
+  - RULE-SET,steam,steam
+  - RULE-SET,epic,epic
+  - RULE-SET,xbox,xbox
+  - RULE-SET,playstation,playstation
+  - RULE-SET,nintendo,nintendo
+  - RULE-SET,roblox,roblox
+  - RULE-SET,blizzard,blizzard
+  - RULE-SET,ea,ea
+  - RULE-SET,github,github
+  - RULE-SET,docker,docker
+  - RULE-SET,gitlab,gitlab
+  - RULE-SET,oracle,oracle
+  - RULE-SET,aws,aws
+  - RULE-SET,digitalocean,digitalocean
+  - RULE-SET,speedtest,speedtest
+  - RULE-SET,paypal,paypal
+  - RULE-SET,stripe,stripe
+  - RULE-SET,protonmail,protonmail
+  - RULE-SET,onedrive,onedrive
+  - RULE-SET,google,google
+  - RULE-SET,microsoft,microsoft
+  - RULE-SET,apple,apple
+  - RULE-SET,games-cn,DIRECT
+  - RULE-SET,cn,DIRECT
+  - RULE-SET,cloudflare,cloudflare
+  - RULE-SET,category-dev,category-dev
+  - RULE-SET,telegram_ip,telegram
+  - RULE-SET,google_ip,google
+  - RULE-SET,cn_ip,DIRECT
+  - MATCH,yu
+
+rule-providers:
+  ads: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/category-ads-all.mrs", path: ./ads.mrs }
+  openai: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/openai.mrs", path: ./openai.mrs }
+  anthropic: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/anthropic.mrs", path: ./anthropic.mrs }
+  gemini: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/google-gemini.mrs", path: ./gemini.mrs }
+  huggingface: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/huggingface.mrs", path: ./huggingface.mrs }
+  notion: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/notion.mrs", path: ./notion.mrs }
+  ai-general: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/category-ai-!cn.mrs", path: ./ai-general.mrs }
+  youtube: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/youtube.mrs", path: ./youtube.mrs }
+  netflix: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/netflix.mrs", path: ./netflix.mrs }
+  disney: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/disney.mrs", path: ./disney.mrs }
+  hbo: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/hbo.mrs", path: ./hbo.mrs }
+  hulu: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/hulu.mrs", path: ./hulu.mrs }
+  primevideo: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/primevideo.mrs", path: ./primevideo.mrs }
+  appletv: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/apple-tvplus.mrs", path: ./appletv.mrs }
+  twitch: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/twitch.mrs", path: ./twitch.mrs }
+  tiktok: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/tiktok.mrs", path: ./tiktok.mrs }
+  bilibili-intl: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/biliintl.mrs", path: ./bilibili-intl.mrs }
+  spotify: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/spotify.mrs", path: ./spotify.mrs }
+  applemusic: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo-lite/geosite/applemusic.mrs", path: ./applemusic.mrs }
+  soundcloud: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/soundcloud.mrs", path: ./soundcloud.mrs }
+  tidal: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/tidal.mrs", path: ./tidal.mrs }
+  telegram: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/telegram.mrs", path: ./telegram.mrs }
+  twitter: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/twitter.mrs", path: ./twitter.mrs }
+  facebook: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/facebook.mrs", path: ./facebook.mrs }
+  instagram: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/instagram.mrs", path: ./instagram.mrs }
+  whatsapp: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/whatsapp.mrs", path: ./whatsapp.mrs }
+  reddit: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/reddit.mrs", path: ./reddit.mrs }
+  discord: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/discord.mrs", path: ./discord.mrs }
+  pinterest: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/pinterest.mrs", path: ./pinterest.mrs }
+  linkedin: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/linkedin.mrs", path: ./linkedin.mrs }
+  steam: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/steam.mrs", path: ./steam.mrs }
+  epic: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/epicgames.mrs", path: ./epic.mrs }
+  xbox: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/xbox.mrs", path: ./xbox.mrs }
+  playstation: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/playstation.mrs", path: ./playstation.mrs }
+  nintendo: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/nintendo.mrs", path: ./nintendo.mrs }
+  roblox: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/roblox.mrs", path: ./roblox.mrs }
+  blizzard: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/blizzard.mrs", path: ./blizzard.mrs }
+  ea: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/ea.mrs", path: ./ea.mrs }
+  github: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/github.mrs", path: ./github.mrs }
+  docker: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/docker.mrs", path: ./docker.mrs }
+  gitlab: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/gitlab.mrs", path: ./gitlab.mrs }
+  oracle: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/oracle.mrs", path: ./oracle.mrs }
+  aws: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/aws.mrs", path: ./aws.mrs }
+  cloudflare: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/cloudflare.mrs", path: ./cloudflare.mrs }
+  digitalocean: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/digitalocean.mrs", path: ./digitalocean.mrs }
+  speedtest: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/ookla-speedtest.mrs", path: ./speedtest.mrs }
+  paypal: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/paypal.mrs", path: ./paypal.mrs }
+  protonmail: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/protonmail.mrs", path: ./protonmail.mrs }
+  onedrive: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/onedrive.mrs", path: ./onedrive.mrs }
+  google: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/google.mrs", path: ./google.mrs }
+  microsoft: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/microsoft.mrs", path: ./microsoft.mrs }
+  apple: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/apple.mrs", path: ./apple.mrs }
+  stripe: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/stripe.mrs", path: ./stripe.mrs }
+  games-cn: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/category-games-cn.mrs", path: ./games-cn.mrs }
+  cn: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/cn.mrs", path: ./cn.mrs }
+  private: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/private.mrs", path: ./private.mrs }
+  cn_ip: { <<: *i, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geoip/cn.mrs", path: ./cn_ip.mrs }
+  private_ip: { <<: *i, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geoip/private.mrs", path: ./private_ip.mrs }
+  telegram_ip: { <<: *i, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geoip/telegram.mrs", path: ./telegram_ip.mrs }
+  google_ip: { <<: *i, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geoip/google.mrs", path: ./google_ip.mrs }
+  category-dev: { <<: *d, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/category-dev.mrs", path: ./category-dev.mrs }
