@@ -1,10 +1,16 @@
 name: Build OpenWrt for Qihoo 360T7
 
 on:
-  workflow_dispatch:        # 手动触发
+  workflow_dispatch:
   push:
     paths:
-      - '.github/workflows/build-openwrt.yml'  # 修改 workflow 时自动触发
+      - '.github/workflows/build-openwrt.yml'
+      - 'files/**'
+
+env:
+  OPENWRT_VERSION: "25.12.2"
+  TARGET: "mediatek/filogic"
+  PROFILE: "qihoo_360t7"
 
 jobs:
   build:
@@ -12,26 +18,51 @@ jobs:
     timeout-minutes: 60
 
     steps:
-      - name: Checkout
+      - name: 📥 Checkout repository
         uses: actions/checkout@v4
 
-      - name: Download ImageBuilder
+      - name: 🔧 Install dependencies
         run: |
-          wget -q https://downloads.openwrt.org/releases/25.12.2/targets/mediatek/filogic/openwrt-imagebuilder-25.12.2-mediatek-filogic.Linux-x86_64.tar.zst
-          tar --zstd -xf openwrt-imagebuilder-25.12.2-mediatek-filogic.Linux-x86_64.tar.zst
-          mv openwrt-imagebuilder-25.12.2-mediatek-filogic.Linux-x86_64 imagebuilder
-
-      - name: Install dependencies
-        run: |
+          echo ">>> 安装构建依赖..."
           sudo apt-get update -qq
-          sudo apt-get install -y build-essential libncurses-dev zlib1g-dev gawk \
-            git gettext libssl-dev xsltproc rsync wget unzip python3
+          sudo apt-get install -y \
+            build-essential libncurses-dev zlib1g-dev gawk \
+            gettext libssl-dev xsltproc rsync wget unzip python3 \
+            qemu-utils
+          echo ">>> 依赖安装完成"
 
-      - name: Build firmware
+      - name: 📦 Download ImageBuilder
+        run: |
+          BUILDER="openwrt-imagebuilder-${OPENWRT_VERSION}-mediatek-filogic.Linux-x86_64"
+          echo ">>> 下载 ImageBuilder ${OPENWRT_VERSION}..."
+          wget --progress=bar:force \
+            "https://downloads.openwrt.org/releases/${OPENWRT_VERSION}/targets/${TARGET}/${BUILDER}.tar.zst"
+          echo ">>> 解压中..."
+          tar --zstd -xf "${BUILDER}.tar.zst"
+          mv "${BUILDER}" imagebuilder
+          echo ">>> ImageBuilder 准备完成"
+
+      - name: 🔍 Verify profile exists
+        run: |
+          echo ">>> 检查设备 Profile 是否存在..."
+          cd imagebuilder
+          make info | grep -A3 "${PROFILE}" || {
+            echo "❌ Profile '${PROFILE}' 不存在，可用 Profile 列表："
+            make info
+            exit 1
+          }
+          echo ">>> Profile 确认存在 ✅"
+
+      - name: 🏗️ Build firmware
         run: |
           cd imagebuilder
+          echo ">>> 开始构建固件，Profile: ${PROFILE}"
+          echo ">>> 版本: ${OPENWRT_VERSION}"
+          echo ">>> 时间: $(date)"
+          echo "---"
+
           make image \
-            PROFILE="qihoo_360t7" \
+            PROFILE="${PROFILE}" \
             PACKAGES="apk-mbedtls base-files ca-bundle dnsmasq-full dropbear \
               firewall4 fitblk fstools kmod-crypto-hw-safexcel \
               kmod-gpio-button-hotplug kmod-leds-gpio libc libgcc \
@@ -42,36 +73,37 @@ jobs:
               openssh-sftp-server zoneinfo-asia curl yq \
               kmod-nft-offload kmod-nft-socket kmod-nft-tproxy kmod-tun \
               kmod-inet-diag ip-full kmod-dummy luci-app-attendedsysupgrade" \
-            FILES="../files" 2>&1 | tee build.log || true
-          # 检查固件是否生成成功
-          ls -lh bin/targets/mediatek/filogic/
+            FILES="../files" \
+            2>&1
 
-      - name: Check build result
+          echo "---"
+          echo ">>> 构建完成，时间: $(date)"
+
+      - name: ✅ Verify output
         run: |
-          if ls imagebuilder/bin/targets/mediatek/filogic/*sysupgrade* 1>/dev/null 2>&1; then
-            echo "BUILD_OK=true" >> $GITHUB_ENV
-            echo "✅ 固件构建成功"
-          else
-            echo "BUILD_OK=false" >> $GITHUB_ENV
-            echo "❌ 固件构建失败，查看日志"
-            cat imagebuilder/build.log | tail -50
+          echo ">>> 检查输出文件..."
+          cd imagebuilder
+
+          SYSUPGRADE=$(ls bin/targets/mediatek/filogic/*sysupgrade* 2>/dev/null)
+          if [ -z "$SYSUPGRADE" ]; then
+            echo "❌ 未找到 sysupgrade 固件，构建失败"
             exit 1
           fi
 
-      - name: Upload firmware
-        if: env.BUILD_OK == 'true'
+          echo ">>> 固件文件列表："
+          ls -lh bin/targets/mediatek/filogic/
+          echo ""
+          echo ">>> SHA256 校验值："
+          cat bin/targets/mediatek/filogic/sha256sums
+          echo ""
+          echo "✅ 固件构建成功：$(basename $SYSUPGRADE)"
+
+      - name: 📤 Upload firmware artifact
         uses: actions/upload-artifact@v4
         with:
-          name: openwrt-360T7-${{ github.run_number }}
+          name: openwrt-360T7-${{ env.OPENWRT_VERSION }}-${{ github.run_number }}
           path: |
             imagebuilder/bin/targets/mediatek/filogic/*sysupgrade*
             imagebuilder/bin/targets/mediatek/filogic/sha256sums
           retention-days: 30
-
-      - name: Upload build log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-log-${{ github.run_number }}
-          path: imagebuilder/build.log
-          retention-days: 7
+          if-no-files-found: error
