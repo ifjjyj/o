@@ -11,6 +11,7 @@ env:
   OPENWRT_VERSION: "25.12.2"
   TARGET: "mediatek/filogic"
   PROFILE: "qihoo_360t7"
+  ARCH: "aarch64_cortex-a53"
 
 jobs:
   build:
@@ -42,6 +43,59 @@ jobs:
           mv "${BUILDER}" imagebuilder
           echo ">>> ImageBuilder 准备完成"
 
+      - name: 🔌 Add nikki third-party feed
+  run: |
+    cd imagebuilder
+
+    # 自动提取主版本号，例如 25.12.2 -> 25.12
+    OPENWRT_MAJOR="${OPENWRT_VERSION%.*}"
+
+    # 正确的 nikki feed（匹配 release ABI）
+    NIKKI_FEED="https://nikkinikki.pages.dev/openwrt-${OPENWRT_MAJOR}/${ARCH}/nikki"
+    NIKKI_KEY_URL="https://nikkinikki.pages.dev/key-build.pub"
+
+    echo ">>> OpenWrt Version: ${OPENWRT_VERSION}"
+    echo ">>> OpenWrt Major: ${OPENWRT_MAJOR}"
+    echo ">>> ARCH: ${ARCH}"
+    echo ">>> 添加 nikki feed: ${NIKKI_FEED}"
+
+    # 下载公钥
+    wget -q "${NIKKI_KEY_URL}" -O /tmp/nikki-key.pub
+
+    echo ">>> 公钥内容："
+    cat /tmp/nikki-key.pub
+
+    # 提取 usign key ID（标准做法，最稳定）
+    KEYID=$(python3 - << 'EOF'
+import base64
+with open('/tmp/nikki-key.pub') as f:
+    for line in f:
+        line=line.strip()
+        if line and not line.startswith("untrusted comment:"):
+            data=base64.b64decode(line)
+            print(data[4:12].hex())
+            break
+EOF
+)
+
+    echo ">>> nikki 公钥 ID: ${KEYID}"
+
+    # 写入 keys 目录（ImageBuilder 必须）
+    mkdir -p keys
+    cp /tmp/nikki-key.pub "keys/${KEYID}"
+
+    # 写入仓库
+    echo "" >> repositories.conf
+    echo "## nikki third-party feed" >> repositories.conf
+    echo "src/gz nikki ${NIKKI_FEED}" >> repositories.conf
+
+    echo ">>> repositories.conf 最终内容："
+    cat repositories.conf
+
+    # 可选：验证 feed 架构是否正确（强烈建议保留）
+    echo ">>> 验证 nikki 架构..."
+    wget -qO- ${NIKKI_FEED}/Packages.gz | gunzip | grep -m1 "Architecture" || true
+
       - name: 🔍 Verify profile exists
         run: |
           echo ">>> 检查设备 Profile 是否存在..."
@@ -60,7 +114,6 @@ jobs:
           echo ">>> 版本: ${OPENWRT_VERSION}"
           echo ">>> 时间: $(date)"
           echo "---"
-
           make image \
             PROFILE="${PROFILE}" \
             PACKAGES="apk-mbedtls base-files ca-bundle dnsmasq-full dropbear \
@@ -72,10 +125,13 @@ jobs:
               kmod-mt7915e kmod-mt7981-firmware mt7981-wo-firmware luci \
               openssh-sftp-server zoneinfo-asia curl yq \
               kmod-nft-offload kmod-nft-socket kmod-nft-tproxy kmod-tun \
-              kmod-inet-diag ip-full kmod-dummy luci-app-attendedsysupgrade" \
+              kmod-inet-diag ip-full kmod-dummy \
+              luci-app-attendedsysupgrade luci-i18n-attendedsysupgrade-zh-cn \
+              luci-i18n-base-zh-cn luci-i18n-firewall-zh-cn \
+              luci-i18n-package-manager-zh-cn \
+              nikki luci-app-nikki luci-i18n-nikki-zh-cn" \
             FILES="../files" \
             2>&1
-
           echo "---"
           echo ">>> 构建完成，时间: $(date)"
 
@@ -83,13 +139,11 @@ jobs:
         run: |
           echo ">>> 检查输出文件..."
           cd imagebuilder
-
           SYSUPGRADE=$(ls bin/targets/mediatek/filogic/*sysupgrade* 2>/dev/null)
           if [ -z "$SYSUPGRADE" ]; then
             echo "❌ 未找到 sysupgrade 固件，构建失败"
             exit 1
           fi
-
           echo ">>> 固件文件列表："
           ls -lh bin/targets/mediatek/filogic/
           echo ""
