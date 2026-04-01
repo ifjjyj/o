@@ -1,0 +1,160 @@
+name: Build OpenWrt for Qihoo 360T7
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/build-openwrt.yml'
+      - 'files/**'
+
+env:
+  OPENWRT_VERSION: "25.12.2"
+  TARGET: "mediatek/filogic"
+  PROFILE: "qihoo_360t7"
+  ARCH: "aarch64_cortex-a53"
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4.2.2
+
+      - name: 🔧 Install dependencies
+        run: |
+          echo ">>> 安装构建依赖..."
+          sudo apt-get update -qq
+          sudo apt-get install -y \
+            build-essential libncurses-dev zlib1g-dev gawk \
+            gettext libssl-dev xsltproc rsync wget unzip python3 \
+            qemu-utils
+          echo ">>> 依赖安装完成"
+
+      - name: 📦 Download ImageBuilder
+        run: |
+          BUILDER="openwrt-imagebuilder-${OPENWRT_VERSION}-mediatek-filogic.Linux-x86_64"
+          echo ">>> 下载 ImageBuilder ${OPENWRT_VERSION}..."
+          wget --progress=bar:force \
+            "https://downloads.openwrt.org/releases/${OPENWRT_VERSION}/targets/${TARGET}/${BUILDER}.tar.zst"
+          echo ">>> 解压中..."
+          tar --zstd -xf "${BUILDER}.tar.zst"
+          mv "${BUILDER}" imagebuilder
+          echo ">>> ImageBuilder 准备完成"
+
+      - name: 🔌 Add nikki third-party feed
+        run: |
+          set -euo pipefail
+          cd imagebuilder
+
+          OPENWRT_MAJOR="${OPENWRT_VERSION%.*}"
+          NIKKI_FEED="https://nikkinikki.pages.dev/openwrt-${OPENWRT_MAJOR}/${ARCH}/nikki"
+          NIKKI_KEY_URL="https://nikkinikki.pages.dev/key-build.pub"
+
+          echo ">>> OpenWrt Version: ${OPENWRT_VERSION}"
+          echo ">>> OpenWrt Major:   ${OPENWRT_MAJOR}"
+          echo ">>> ARCH:            ${ARCH}"
+          echo ">>> nikki feed:      ${NIKKI_FEED}"
+
+          wget -q "${NIKKI_KEY_URL}" -O /tmp/nikki-key.pub
+
+          echo ">>> 公钥内容："
+          cat /tmp/nikki-key.pub
+
+          # 将 Python 脚本写入临时文件，彻底避免 YAML 引号冲突
+          cat > /tmp/extract_keyid.py << 'PYEOF'
+import base64
+with open('/tmp/nikki-key.pub') as f:
+    for line in f:
+        line = line.strip()
+        if line and not line.startswith('untrusted comment:'):
+            data = base64.b64decode(line)
+            print(data[4:12].hex())
+            break
+PYEOF
+
+          KEYID=$(python3 /tmp/extract_keyid.py)
+
+          [ -z "${KEYID}" ] && { echo "❌ 无法提取公钥 ID"; exit 1; }
+          echo ">>> nikki 公钥 ID: ${KEYID}"
+
+          mkdir -p keys
+          cp /tmp/nikki-key.pub "keys/${KEYID}"
+
+          echo "" >> repositories.conf
+          echo "## nikki third-party feed" >> repositories.conf
+          echo "src/gz nikki ${NIKKI_FEED}" >> repositories.conf
+
+          echo ">>> repositories.conf 最终内容："
+          cat repositories.conf
+
+          echo ">>> 验证 nikki feed 可达性及架构..."
+          wget -qO- "${NIKKI_FEED}/Packages.gz" | gunzip | grep -m1 "Architecture" \
+            || { echo "❌ nikki feed 不可达或架构不匹配"; exit 1; }
+
+      - name: 🔍 Verify profile exists
+        run: |
+          echo ">>> 检查设备 Profile 是否存在..."
+          cd imagebuilder
+          make info | grep -A3 "${PROFILE}" || {
+            echo "❌ Profile '${PROFILE}' 不存在，可用 Profile 列表："
+            make info
+            exit 1
+          }
+          echo ">>> Profile 确认存在 ✅"
+
+      - name: 🏗️ Build firmware
+        run: |
+          set -euo pipefail
+          cd imagebuilder
+          echo ">>> 开始构建固件，Profile: ${PROFILE}"
+          echo ">>> 版本: ${OPENWRT_VERSION}"
+          echo ">>> 时间: $(date)"
+          echo "---"
+          make image \
+            PROFILE="${PROFILE}" \
+            PACKAGES="apk-mbedtls base-files ca-bundle dnsmasq-full dropbear \
+              firewall4 fitblk fstools kmod-crypto-hw-safexcel \
+              kmod-gpio-button-hotplug kmod-leds-gpio libc libgcc \
+              libustream-mbedtls logd mtd netifd nftables odhcp6c \
+              odhcpd-ipv6only ppp ppp-mod-pppoe procd-ujail uboot-envtools \
+              uci uclient-fetch urandom-seed urngd wpad-basic-mbedtls \
+              kmod-mt7915e kmod-mt7981-firmware mt7981-wo-firmware luci \
+              openssh-sftp-server zoneinfo-asia curl yq \
+              kmod-nft-offload kmod-nft-socket kmod-nft-tproxy kmod-tun \
+              kmod-inet-diag ip-full kmod-dummy \
+              luci-app-attendedsysupgrade luci-i18n-attendedsysupgrade-zh-cn \
+              luci-i18n-base-zh-cn luci-i18n-firewall-zh-cn \
+              luci-i18n-package-manager-zh-cn \
+              nikki luci-app-nikki luci-i18n-nikki-zh-cn" \
+            FILES="../files"
+          echo "---"
+          echo ">>> 构建完成，时间: $(date)"
+
+      - name: ✅ Verify output
+        run: |
+          echo ">>> 检查输出文件..."
+          cd imagebuilder
+          SYSUPGRADE=$(ls bin/targets/mediatek/filogic/*sysupgrade* 2>/dev/null)
+          if [ -z "$SYSUPGRADE" ]; then
+            echo "❌ 未找到 sysupgrade 固件，构建失败"
+            exit 1
+          fi
+          echo ">>> 固件文件列表："
+          ls -lh bin/targets/mediatek/filogic/
+          echo ""
+          echo ">>> SHA256 校验值："
+          cat bin/targets/mediatek/filogic/sha256sums
+          echo ""
+          echo "✅ 固件构建成功：$(basename $SYSUPGRADE)"
+
+      - name: 📤 Upload firmware artifact
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: openwrt-360T7-${{ env.OPENWRT_VERSION }}-${{ github.run_number }}
+          path: |
+            imagebuilder/bin/targets/mediatek/filogic/*sysupgrade*
+            imagebuilder/bin/targets/mediatek/filogic/sha256sums
+          retention-days: 30
+          if-no-files-found: error
