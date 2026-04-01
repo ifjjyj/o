@@ -62,17 +62,16 @@ jobs:
           echo ">>> 公钥内容："
           cat /tmp/nikki-key.pub
 
-          # 将 Python 脚本写入临时文件，彻底避免 YAML 引号冲突
-          cat > /tmp/extract_keyid.py << 'PYEOF'
-import base64
-with open('/tmp/nikki-key.pub') as f:
-    for line in f:
-        line = line.strip()
-        if line and not line.startswith('untrusted comment:'):
-            data = base64.b64decode(line)
-            print(data[4:12].hex())
-            break
-PYEOF
+          printf '%s\n' \
+            'import base64' \
+            'with open("/tmp/nikki-key.pub") as f:' \
+            '    for line in f:' \
+            '        line = line.strip()' \
+            '        if line and not line.startswith("untrusted comment:"):' \
+            '            data = base64.b64decode(line)' \
+            '            print(data[4:12].hex())' \
+            '            break' \
+            > /tmp/extract_keyid.py
 
           KEYID=$(python3 /tmp/extract_keyid.py)
 
