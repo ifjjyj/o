@@ -1,0 +1,77 @@
+name: Build OpenWrt for Qihoo 360T7
+
+on:
+  workflow_dispatch:        # 手动触发
+  push:
+    paths:
+      - '.github/workflows/build-openwrt.yml'  # 修改 workflow 时自动触发
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download ImageBuilder
+        run: |
+          wget -q https://downloads.openwrt.org/releases/25.12.2/targets/mediatek/filogic/openwrt-imagebuilder-25.12.2-mediatek-filogic.Linux-x86_64.tar.zst
+          tar --zstd -xf openwrt-imagebuilder-25.12.2-mediatek-filogic.Linux-x86_64.tar.zst
+          mv openwrt-imagebuilder-25.12.2-mediatek-filogic.Linux-x86_64 imagebuilder
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y build-essential libncurses-dev zlib1g-dev gawk \
+            git gettext libssl-dev xsltproc rsync wget unzip python3
+
+      - name: Build firmware
+        run: |
+          cd imagebuilder
+          make image \
+            PROFILE="qihoo_360t7" \
+            PACKAGES="apk-mbedtls base-files ca-bundle dnsmasq-full dropbear \
+              firewall4 fitblk fstools kmod-crypto-hw-safexcel \
+              kmod-gpio-button-hotplug kmod-leds-gpio libc libgcc \
+              libustream-mbedtls logd mtd netifd nftables odhcp6c \
+              odhcpd-ipv6only ppp ppp-mod-pppoe procd-ujail uboot-envtools \
+              uci uclient-fetch urandom-seed urngd wpad-basic-mbedtls \
+              kmod-mt7915e kmod-mt7981-firmware mt7981-wo-firmware luci \
+              openssh-sftp-server zoneinfo-asia curl yq \
+              kmod-nft-offload kmod-nft-socket kmod-nft-tproxy kmod-tun \
+              kmod-inet-diag ip-full kmod-dummy luci-app-attendedsysupgrade" \
+            FILES="../files" 2>&1 | tee build.log || true
+          # 检查固件是否生成成功
+          ls -lh bin/targets/mediatek/filogic/
+
+      - name: Check build result
+        run: |
+          if ls imagebuilder/bin/targets/mediatek/filogic/*sysupgrade* 1>/dev/null 2>&1; then
+            echo "BUILD_OK=true" >> $GITHUB_ENV
+            echo "✅ 固件构建成功"
+          else
+            echo "BUILD_OK=false" >> $GITHUB_ENV
+            echo "❌ 固件构建失败，查看日志"
+            cat imagebuilder/build.log | tail -50
+            exit 1
+          fi
+
+      - name: Upload firmware
+        if: env.BUILD_OK == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: openwrt-360T7-${{ github.run_number }}
+          path: |
+            imagebuilder/bin/targets/mediatek/filogic/*sysupgrade*
+            imagebuilder/bin/targets/mediatek/filogic/sha256sums
+          retention-days: 30
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log-${{ github.run_number }}
+          path: imagebuilder/build.log
+          retention-days: 7
