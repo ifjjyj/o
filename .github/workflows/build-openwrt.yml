@@ -62,8 +62,8 @@ jobs:
           echo ">>> 公钥内容："
           cat /tmp/nikki-key.pub
 
-          # 用单行 python -c 替代 heredoc，彻底避免 YAML 缩进冲突
-          KEYID=$(python3 -c "
+          # 将 Python 脚本写入临时文件，彻底避免 YAML 引号冲突
+          cat > /tmp/extract_keyid.py << 'PYEOF'
 import base64
 with open('/tmp/nikki-key.pub') as f:
     for line in f:
@@ -72,7 +72,9 @@ with open('/tmp/nikki-key.pub') as f:
             data = base64.b64decode(line)
             print(data[4:12].hex())
             break
-")
+PYEOF
+
+          KEYID=$(python3 /tmp/extract_keyid.py)
 
           [ -z "${KEYID}" ] && { echo "❌ 无法提取公钥 ID"; exit 1; }
           echo ">>> nikki 公钥 ID: ${KEYID}"
