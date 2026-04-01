@@ -19,7 +19,7 @@ jobs:
 
     steps:
       - name: 📥 Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.2.2
 
       - name: 🔧 Install dependencies
         run: |
@@ -99,7 +99,7 @@ jobs:
           echo "✅ 固件构建成功：$(basename $SYSUPGRADE)"
 
       - name: 📤 Upload firmware artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: openwrt-360T7-${{ env.OPENWRT_VERSION }}-${{ github.run_number }}
           path: |
