@@ -49,49 +49,34 @@ jobs:
           cd imagebuilder
 
           OPENWRT_MAJOR="${OPENWRT_VERSION%.*}"
-          NIKKI_FEED="https://nikkinikki.pages.dev/openwrt-${OPENWRT_MAJOR}/${ARCH}/nikki"
-          NIKKI_KEY_URL="https://nikkinikki.pages.dev/key-build.pub"
+          NIKKI_BASE="https://nikkinikki.pages.dev"
+          NIKKI_FEED="${NIKKI_BASE}/openwrt-${OPENWRT_MAJOR}/${ARCH}/nikki"
 
           echo ">>> OpenWrt Version: ${OPENWRT_VERSION}"
           echo ">>> OpenWrt Major:   ${OPENWRT_MAJOR}"
           echo ">>> ARCH:            ${ARCH}"
           echo ">>> nikki feed:      ${NIKKI_FEED}"
 
-          wget -q "${NIKKI_KEY_URL}" -O /tmp/nikki-key.pub
-          echo ">>> 公钥内容："
-          cat /tmp/nikki-key.pub
-
-          printf '%s\n' \
-            'import base64' \
-            'with open("/tmp/nikki-key.pub") as f:' \
-            '    for line in f:' \
-            '        line = line.strip()' \
-            '        if line and not line.startswith("untrusted comment:"):' \
-            '            data = base64.b64decode(line)' \
-            '            print(data[4:12].hex())' \
-            '            break' \
-            > /tmp/extract_keyid.py
-
-          KEYID=$(python3 /tmp/extract_keyid.py)
-          [ -z "${KEYID}" ] && { echo "❌ 无法提取公钥 ID"; exit 1; }
-          echo ">>> nikki 公钥 ID: ${KEYID}"
-
+          # 25.12 使用 apk，公钥格式为 PEM
+          echo ">>> 下载 nikki 公钥 (PEM)..."
           mkdir -p keys
-          cp /tmp/nikki-key.pub "keys/${KEYID}"
+          wget -q "${NIKKI_BASE}/public-key.pem" -O "keys/nikki.pem"
+          echo ">>> 公钥内容："
+          cat "keys/nikki.pem"
 
-          # openwrt-25.12 使用 apk，feed 格式为 src/gz（ImageBuilder 仍用此格式读取 apk 源）
+          # 验证 feed 可达
+          echo ">>> 验证 nikki feed 可达性..."
+          wget -q --spider "${NIKKI_FEED}/packages.adb" \
+            || { echo "❌ nikki feed 不可达"; exit 1; }
+          echo ">>> nikki feed 验证通过 ✅"
+
+          # 25.12 apk 格式：直接写 packages.adb 完整 URL
           echo "" >> repositories.conf
           echo "## nikki third-party feed" >> repositories.conf
-          echo "src/gz nikki ${NIKKI_FEED}" >> repositories.conf
+          echo "${NIKKI_FEED}/packages.adb" >> repositories.conf
 
           echo ">>> repositories.conf 最终内容："
           cat repositories.conf
-
-          # 25.12 用 apk，索引文件是 APKINDEX.tar.gz，不再是 Packages.gz
-          echo ">>> 验证 nikki feed 可达性..."
-          wget -q --spider "${NIKKI_FEED}/APKINDEX.tar.gz" \
-            || { echo "❌ nikki feed 不可达，请检查 ARCH 和版本"; exit 1; }
-          echo ">>> nikki feed 验证通过 ✅"
 
       - name: 🔍 Verify profile exists
         run: |
