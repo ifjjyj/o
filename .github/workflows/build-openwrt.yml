@@ -48,9 +48,7 @@ jobs:
           set -euo pipefail
           cd imagebuilder
 
-          # 自动提取主版本号，例如 25.12.2 -> 25.12
           OPENWRT_MAJOR="${OPENWRT_VERSION%.*}"
-
           NIKKI_FEED="https://nikkinikki.pages.dev/openwrt-${OPENWRT_MAJOR}/${ARCH}/nikki"
           NIKKI_KEY_URL="https://nikkinikki.pages.dev/key-build.pub"
 
@@ -59,34 +57,29 @@ jobs:
           echo ">>> ARCH:            ${ARCH}"
           echo ">>> nikki feed:      ${NIKKI_FEED}"
 
-          # 下载公钥
           wget -q "${NIKKI_KEY_URL}" -O /tmp/nikki-key.pub
 
           echo ">>> 公钥内容："
           cat /tmp/nikki-key.pub
 
-          # 提取 usign key ID
-          KEYID=$(python3 - << 'EOF'
+          # 用单行 python -c 替代 heredoc，彻底避免 YAML 缩进冲突
+          KEYID=$(python3 -c "
 import base64
 with open('/tmp/nikki-key.pub') as f:
     for line in f:
         line = line.strip()
-        if line and not line.startswith("untrusted comment:"):
+        if line and not line.startswith('untrusted comment:'):
             data = base64.b64decode(line)
             print(data[4:12].hex())
             break
-EOF
-)
+")
 
-          # 验证 KEYID 非空
           [ -z "${KEYID}" ] && { echo "❌ 无法提取公钥 ID"; exit 1; }
           echo ">>> nikki 公钥 ID: ${KEYID}"
 
-          # 写入 keys 目录
           mkdir -p keys
           cp /tmp/nikki-key.pub "keys/${KEYID}"
 
-          # 写入仓库配置
           echo "" >> repositories.conf
           echo "## nikki third-party feed" >> repositories.conf
           echo "src/gz nikki ${NIKKI_FEED}" >> repositories.conf
@@ -94,10 +87,9 @@ EOF
           echo ">>> repositories.conf 最终内容："
           cat repositories.conf
 
-          # 验证 feed 可达且架构匹配，失败则显式退出
           echo ">>> 验证 nikki feed 可达性及架构..."
           wget -qO- "${NIKKI_FEED}/Packages.gz" | gunzip | grep -m1 "Architecture" \
-            || { echo "❌ nikki feed 不可达或架构不匹配，请检查 ARCH 和版本"; exit 1; }
+            || { echo "❌ nikki feed 不可达或架构不匹配"; exit 1; }
 
       - name: 🔍 Verify profile exists
         run: |
