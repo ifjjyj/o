@@ -58,7 +58,6 @@ jobs:
           echo ">>> nikki feed:      ${NIKKI_FEED}"
 
           wget -q "${NIKKI_KEY_URL}" -O /tmp/nikki-key.pub
-
           echo ">>> 公钥内容："
           cat /tmp/nikki-key.pub
 
@@ -74,13 +73,13 @@ jobs:
             > /tmp/extract_keyid.py
 
           KEYID=$(python3 /tmp/extract_keyid.py)
-
           [ -z "${KEYID}" ] && { echo "❌ 无法提取公钥 ID"; exit 1; }
           echo ">>> nikki 公钥 ID: ${KEYID}"
 
           mkdir -p keys
           cp /tmp/nikki-key.pub "keys/${KEYID}"
 
+          # openwrt-25.12 使用 apk，feed 格式为 src/gz（ImageBuilder 仍用此格式读取 apk 源）
           echo "" >> repositories.conf
           echo "## nikki third-party feed" >> repositories.conf
           echo "src/gz nikki ${NIKKI_FEED}" >> repositories.conf
@@ -88,9 +87,11 @@ jobs:
           echo ">>> repositories.conf 最终内容："
           cat repositories.conf
 
-          echo ">>> 验证 nikki feed 可达性及架构..."
-          wget -qO- "${NIKKI_FEED}/Packages.gz" | gunzip | grep -m1 "Architecture" \
-            || { echo "❌ nikki feed 不可达或架构不匹配"; exit 1; }
+          # 25.12 用 apk，索引文件是 APKINDEX.tar.gz，不再是 Packages.gz
+          echo ">>> 验证 nikki feed 可达性..."
+          wget -q --spider "${NIKKI_FEED}/APKINDEX.tar.gz" \
+            || { echo "❌ nikki feed 不可达，请检查 ARCH 和版本"; exit 1; }
+          echo ">>> nikki feed 验证通过 ✅"
 
       - name: 🔍 Verify profile exists
         run: |
