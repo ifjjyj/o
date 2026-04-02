@@ -22,7 +22,7 @@ config dnsmasq
 	option filter_a '0'
 	option edns_packet_max '1232'
 	option dns_forward_max '1000'
-	option min_cache_ttl '60'
+	option min_cache_ttl '600'
 	option max_cache_ttl '3600'
 
 config dhcp 'lan'
