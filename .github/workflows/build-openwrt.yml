@@ -97,7 +97,7 @@ jobs:
               kmod-mt7915e kmod-mt7981-firmware mt7981-wo-firmware luci \
               openssh-sftp-server zoneinfo-asia curl yq \
               kmod-nft-offload kmod-nft-socket kmod-nft-tproxy kmod-tun \
-              kmod-inet-diag ip-full kmod-dummy \
+              kmod-inet-diag ip-full kmod-dummy kmod-tcp-bbr \
               luci-app-attendedsysupgrade luci-i18n-attendedsysupgrade-zh-cn \
               luci-i18n-base-zh-cn luci-i18n-firewall-zh-cn \
               luci-i18n-package-manager-zh-cn \
