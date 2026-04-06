@@ -125,23 +125,12 @@ jobs:
               cp "${PDB}" "${NIKKI_PKG_DIR}/"
               echo ">>> 找到并复制 packages.adb（来自 ${PDB}）✅"
             else
-              echo "⚠️  tarball 中无 packages.adb，用 apk 工具重新生成..."
-              APK_BIN=$(find imagebuilder -name "apk" -type f -executable | head -1)
-              [ -z "${APK_BIN}" ] && { echo "❌ 未找到 apk 工具"; exit 1; }
-              (cd "${NIKKI_PKG_DIR}" && \
-                "${OLDPWD}/${APK_BIN}" mkndx \
-                  --allow-untrusted \
-                  --output packages.adb \
-                  --description "nikki feed" \
-                  *.apk)
-              echo ">>> packages.adb 生成完成 ✅"
+              echo "⚠️  tarball 中无 packages.adb，跳过"
             fi
           fi
 
           # ---------------------------------------------------------------
           # 第四步：生成 APKINDEX.tar.gz
-          # 注意：Python 代码每行必须保持与此块相同的基准缩进（10 格），
-          # YAML 解析后会自动剥离这 10 格，shell 收到的是正常的 Python 源码。
           # ---------------------------------------------------------------
           echo ">>> [4/4] 生成 APKINDEX.tar.gz..."
           cat > /tmp/gen_apkindex.py << 'PYEOF'
@@ -270,12 +259,32 @@ jobs:
         run: |
           set -euo pipefail
           cd imagebuilder
+
+          # ---------------------------------------------------------------
+          # 找到 ImageBuilder 自带的 apk 二进制，
+          # 在它前面放一个同名 wrapper，强制附加 --allow-untrusted，
+          # 彻底绕过 Makefile 里的签名验证逻辑。
+          # ---------------------------------------------------------------
+          APK_REAL=$(find "$(pwd)" -name "apk" -type f -executable | head -1)
+          echo ">>> 真实 apk 路径：${APK_REAL}"
+
+          mkdir -p /tmp/apk-wrapper
+          cat > /tmp/apk-wrapper/apk << WRAPEOF
+          #!/bin/sh
+          exec "${APK_REAL}" --allow-untrusted "\$@"
+          WRAPEOF
+          chmod +x /tmp/apk-wrapper/apk
+
+          echo ">>> apk wrapper 内容："
+          cat /tmp/apk-wrapper/apk
+
+          # 将 wrapper 目录放到 PATH 最前面
+          export PATH="/tmp/apk-wrapper:${PATH}"
+          echo ">>> PATH：${PATH}"
+          echo ">>> which apk：$(which apk)"
+
           echo ">>> 开始构建固件，Profile: ${PROFILE}，时间: $(date)"
           echo "---"
-
-          sed -i 's/$(APK) fetch/$(APK) fetch --allow-untrusted/g' Makefile
-          sed -i 's/$(APK) add/$(APK) add --allow-untrusted/g'     Makefile
-
           make image \
             PROFILE="${PROFILE}" \
             PACKAGES="apk-mbedtls base-files ca-bundle dnsmasq-full dropbear \
