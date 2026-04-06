@@ -151,6 +151,7 @@ jobs:
 
           cd "${IB_PKG_DIR}"
           "${OLDPWD}/${APK_BIN}" mkndx \
+            --allow-untrusted \
             --output packages.adb \
             --description "base+nikki" \
             *.apk
