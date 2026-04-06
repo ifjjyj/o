@@ -78,10 +78,15 @@ jobs:
           echo ">>> [1/3] 安装 nikki 签名公钥..."
           APK_KEYS_DIR=$(find imagebuilder -path "*/apk/keys" -type d | head -1)
           if [ -z "${APK_KEYS_DIR}" ]; then
-            echo "❌ 未找到 apk/keys 目录"
-            find imagebuilder -name "keys" -type d | head -10
+            echo ">>> apk/keys 未找到，尝试回退到 keys 目录..."
+            APK_KEYS_DIR=$(find imagebuilder -name "keys" -type d | head -1)
+          fi
+          if [ -z "${APK_KEYS_DIR}" ]; then
+            echo "❌ 未找到任何 keys 目录，当前 imagebuilder 结构："
+            find imagebuilder -name "keys" -type d
             exit 1
           fi
+          echo ">>> keys 目录：${APK_KEYS_DIR}"
           wget -q "https://nikkinikki.pages.dev/public-key.pem" \
                -O "${APK_KEYS_DIR}/nikki.pem"
           echo ">>> 公钥已安装：${APK_KEYS_DIR}/nikki.pem ✅"
