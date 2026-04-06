@@ -48,7 +48,7 @@ jobs:
           mv "${BUILDER}" imagebuilder
           echo ">>> ImageBuilder 准备完成"
 
-      - name: 🔌 Download nikki packages & build local APK index
+      - name: 🔌 Add nikki feed to repositories.conf
         run: |
           set -euo pipefail
           cd imagebuilder
@@ -56,47 +56,18 @@ jobs:
           OPENWRT_MAJOR="${OPENWRT_VERSION%.*}"
           NIKKI_FEED="https://nikkinikki.pages.dev/openwrt-${OPENWRT_MAJOR}/${ARCH}/nikki"
 
-          echo ">>> OpenWrt Major: ${OPENWRT_MAJOR}"
-          echo ">>> ARCH:          ${ARCH}"
-          echo ">>> nikki feed:    ${NIKKI_FEED}"
+          echo ">>> 当前 repositories.conf 内容："
+          cat repositories.conf
 
-          mkdir -p packages
+          echo ""
+          echo ">>> 添加 nikki feed..."
+          # 追加到文件末尾，格式与 OpenWrt 官方 feed 保持一致
+          echo "src/gz nikki ${NIKKI_FEED}" >> repositories.conf
 
-          echo ">>> 下载 nikki apk 包..."
-          wget -q "${NIKKI_FEED}/nikki-2026.03.10-r3.apk" \
-               -O packages/nikki-2026.03.10-r3.apk
-          wget -q "${NIKKI_FEED}/luci-app-nikki-1.25.3-r1.apk" \
-               -O packages/luci-app-nikki-1.25.3-r1.apk
-          wget -q "${NIKKI_FEED}/luci-i18n-nikki-zh-cn-26.088.44343~a20a48b.apk" \
-               -O "packages/luci-i18n-nikki-zh-cn-26.088.44343~a20a48b.apk"
-
-          echo ">>> 下载完成，packages 目录内容："
-          ls -lh packages/*.apk
-
-          # ---------------------------------------------------------------
-          # OpenWrt 25.x 使用 APK 包管理器，本地包目录必须有 packages.adb 索引
-          # 否则 ImageBuilder 无法识别本地包（产生大量 "No such file" 警告并报错）
-          # ImageBuilder 自带 apk 工具，路径在 staging_dir/host/bin/apk
-          # ---------------------------------------------------------------
-          echo ">>> 查找 ImageBuilder 自带 apk 工具..."
-          APK_BIN=$(find staging_dir/host/bin -name "apk" -type f 2>/dev/null | head -1)
-          if [ -z "${APK_BIN}" ]; then
-            APK_BIN=$(find . -name "apk" -type f 2>/dev/null | grep -v "\.apk" | head -1)
-          fi
-          if [ -z "${APK_BIN}" ]; then
-            echo "❌ 未找到 apk 工具，无法生成索引"
-            exit 1
-          fi
-          echo ">>> 使用 apk 工具：${APK_BIN}"
-
-          echo ">>> 生成本地 packages.adb 索引..."
-          ${APK_BIN} index \
-            --allow-untrusted \
-            --output packages/packages.adb \
-            packages/*.apk
-
-          echo ">>> 索引生成完成："
-          ls -lh packages/packages.adb
+          echo ""
+          echo ">>> 更新后 repositories.conf 内容："
+          cat repositories.conf
+          echo ">>> nikki feed 添加完成 ✅"
 
       # ---------------------------------------------------------------
       # sing-box 1.13.5 二进制注入
@@ -113,9 +84,6 @@ jobs:
           echo ">>> 下载 sing-box ${SINGBOX_VERSION} (linux-arm64)..."
           wget -q "${SINGBOX_URL}" -O "${SINGBOX_TAR}"
 
-          echo ">>> 实际文件格式："
-          file "${SINGBOX_TAR}"
-
           echo ">>> 解包 tar.gz..."
           mkdir -p singbox_extract
           tar -xzf "${SINGBOX_TAR}" -C singbox_extract
@@ -131,7 +99,7 @@ jobs:
           fi
           echo ">>> 找到二进制：${SINGBOX_BIN}"
 
-          echo ">>> 注入到 files overlay → /usr/bin/sing-box（重命名为 sing-box）"
+          echo ">>> 注入到 files overlay → /usr/bin/sing-box"
           mkdir -p files/usr/bin
           cp "${SINGBOX_BIN}" files/usr/bin/sing-box
           chmod +x files/usr/bin/sing-box
@@ -143,7 +111,7 @@ jobs:
       # ---------------------------------------------------------------
       # mihomo 1.19.22 二进制注入
       # 官方 releases 格式：mihomo-linux-arm64-v{version}.gz（单文件 gzip）
-      # 下载后 gunzip 得到 ./mihomo，重命名为 mihomo 覆盖到 files/usr/bin/mihomo
+      # 下载后 gunzip 得到二进制，重命名为 mihomo 覆盖到 files/usr/bin/mihomo
       # ---------------------------------------------------------------
       - name: 🔧 Inject mihomo ${{ env.MIHOMO_VERSION }} binary (linux/arm64 → files overlay)
         run: |
@@ -154,10 +122,10 @@ jobs:
           echo ">>> 下载 mihomo ${MIHOMO_VERSION} (linux/arm64)..."
           wget -q "${MIHOMO_URL}" -O mihomo.gz
 
-          echo ">>> 解压 gz（gunzip 后重命名为 mihomo）..."
-          gunzip -f mihomo.gz   # 解压得到 ./mihomo 二进制
+          echo ">>> 解压 gz..."
+          gunzip -f mihomo.gz
 
-          echo ">>> 注入到 files overlay → /usr/bin/mihomo（重命名为 mihomo）"
+          echo ">>> 注入到 files overlay → /usr/bin/mihomo"
           mkdir -p files/usr/bin
           cp mihomo files/usr/bin/mihomo
           chmod +x files/usr/bin/mihomo
