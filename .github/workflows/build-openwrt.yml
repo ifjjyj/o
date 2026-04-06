@@ -120,66 +120,20 @@ jobs:
           echo ">>> nikki 相关包："
           ls -lh "${LOCAL_PKG_DIR}/" | grep -i nikki || true
 
-          # 5. 重建 APKINDEX（用独立 Python 脚本文件，避免 YAML heredoc 冲突）
+          # 5. 用 ImageBuilder 自带 apk 二进制重建 APKINDEX，完全不用 Python
           echo ">>> [5/5] 重建 APKINDEX..."
-          cat > /tmp/gen_apkindex.py << 'PYEOF'
-import tarfile, io, os, glob, hashlib, base64, sys
-
-def parse_pkginfo(content):
-    fields = {}
-    for line in content.splitlines():
-        if line.startswith('#') or '=' not in line:
-            continue
-        k, v = line.split('=', 1)
-        fields[k.strip()] = v.strip()
-    return fields
-
-target_dir = sys.argv[1]
-os.chdir(target_dir)
-
-entries = []
-for apk_path in sorted(glob.glob('*.apk')):
-    try:
-        with tarfile.open(apk_path, 'r:gz') as apk:
-            pi = apk.extractfile('.PKGINFO').read().decode()
-        f = parse_pkginfo(pi)
-        chk = 'Q1' + base64.b64encode(
-            hashlib.sha1(open(apk_path, 'rb').read()).digest()
-        ).decode()
-        lines = [
-            'C:' + chk,
-            'P:' + f.get('pkgname', ''),
-            'V:' + f.get('pkgver', ''),
-            'A:' + f.get('arch', ''),
-            'S:' + str(os.path.getsize(apk_path)),
-            'I:' + f.get('size', '0'),
-            'T:' + f.get('pkgdesc', ''),
-            'U:' + f.get('url', ''),
-            'L:' + f.get('license', ''),
-        ]
-        for key, tag in [('origin','o'),('maintainer','m'),
-                          ('builddate','t'),('depend','D'),('provides','p')]:
-            if key in f:
-                lines.append(tag + ':' + f[key])
-        lines.append('')
-        entries.append('\n'.join(lines))
-        print('  indexed: ' + f.get('pkgname', apk_path))
-    except Exception as e:
-        print('  warning: ' + apk_path + ': ' + str(e))
-
-idx = '\n'.join(entries).encode()
-buf = io.BytesIO()
-with tarfile.open(fileobj=buf, mode='w:gz') as tar:
-    info = tarfile.TarInfo(name='APKINDEX')
-    info.size = len(idx)
-    tar.addfile(info, io.BytesIO(idx))
-with open('APKINDEX.tar.gz', 'wb') as fout:
-    fout.write(buf.getvalue())
-print('APKINDEX.tar.gz 重建完成，共 ' + str(len(entries)) + ' 个包 ✅')
-PYEOF
-          python3 /tmp/gen_apkindex.py "${LOCAL_PKG_DIR}"
-          echo ">>> nikki 包已并入本地 feed ✅"
+          APK_BIN=$(find imagebuilder -name "apk" -type f -executable | head -1)
+          if [ -z "${APK_BIN}" ]; then
+            echo "❌ 未找到 ImageBuilder 内置 apk 二进制"; exit 1
+          fi
+          echo ">>> 使用 apk 二进制：${APK_BIN}"
+          "${APK_BIN}" index \
+            --allow-untrusted \
+            -o "${LOCAL_PKG_DIR}/APKINDEX.tar.gz" \
+            "${LOCAL_PKG_DIR}"/*.apk
+          echo ">>> APKINDEX 重建完成 ✅"
           echo ">>> packages 目录 .apk 数量：$(ls ${LOCAL_PKG_DIR}/*.apk | wc -l)"
+          echo ">>> nikki 包已并入本地 feed，无需外部 feed 注册 ✅"
 
       - name: 🔧 Inject sing-box ${{ env.SINGBOX_VERSION }} binary
         run: |
@@ -241,12 +195,11 @@ PYEOF
           fi
           echo ">>> 真实 apk 路径：${APK_REAL}"
 
-          # 创建 wrapper 脚本（注意：这里不能用 << heredoc，改用 printf）
+          # 用 printf 写 wrapper，完全避免 heredoc
           mkdir -p /tmp/apk-wrapper
           printf '#!/bin/sh\nexec "%s" --allow-untrusted "$@"\n' \
             "${APK_REAL}" > /tmp/apk-wrapper/apk
           chmod +x /tmp/apk-wrapper/apk
-
           echo ">>> wrapper 内容："
           cat /tmp/apk-wrapper/apk
 
