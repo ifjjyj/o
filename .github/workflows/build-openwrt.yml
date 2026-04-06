@@ -48,35 +48,58 @@ jobs:
           mv "${BUILDER}" imagebuilder
           echo ">>> ImageBuilder 准备完成"
 
-      - name: 🔌 Add nikki feed to repositories
+      - name: 🔌 Build local nikki mirror & register as file:// feed
         run: |
           set -euo pipefail
-          cd imagebuilder
 
           OPENWRT_MAJOR="${OPENWRT_VERSION%.*}"
-          NIKKI_FEED="https://nikkinikki.pages.dev/openwrt-${OPENWRT_MAJOR}/${ARCH}/nikki"
+          NIKKI_BASE="https://nikkinikki.pages.dev/openwrt-${OPENWRT_MAJOR}/${ARCH}/nikki"
 
-          echo ">>> 查找 repositories 配置文件..."
-          REPO_FILE=$(find . -maxdepth 2 -name "repositories*" -not -path "*/\.*" | head -1)
-          if [ -z "${REPO_FILE}" ]; then
-            echo "❌ 未找到 repositories 配置文件，列出目录结构："
-            ls -la
-            exit 1
+          # ---------------------------------------------------------------
+          # ImageBuilder 的 apk 工具在解析 repositories 文件时会自动在
+          # URL 末尾追加 "{arch}/APKINDEX.tar.gz"
+          # 因此不能直接用 nikki 的 feed URL（会变成 .../nikki/arch/APKINDEX）
+          # 解决方法：建立本地镜像，目录结构为 mirror/{arch}/
+          # 这样 file:///tmp/nikki-mirror → 追加 arch/APKINDEX.tar.gz → 正确路径
+          # ---------------------------------------------------------------
+          MIRROR_DIR="/tmp/nikki-mirror/${ARCH}"
+          mkdir -p "${MIRROR_DIR}"
+
+          echo ">>> 下载 nikki APK 包..."
+          wget -q "${NIKKI_BASE}/nikki-2026.03.10-r3.apk"                -O "${MIRROR_DIR}/nikki-2026.03.10-r3.apk"
+          wget -q "${NIKKI_BASE}/luci-app-nikki-1.25.3-r1.apk"                -O "${MIRROR_DIR}/luci-app-nikki-1.25.3-r1.apk"
+          wget -q "${NIKKI_BASE}/luci-i18n-nikki-zh-cn-26.088.44343~a20a48b.apk"                -O "${MIRROR_DIR}/luci-i18n-nikki-zh-cn-26.088.44343~a20a48b.apk"
+
+          echo ">>> 下载 APKINDEX.tar.gz..."
+          wget -q "${NIKKI_BASE}/APKINDEX.tar.gz"                -O "${MIRROR_DIR}/APKINDEX.tar.gz"
+
+          echo ">>> 本地镜像内容："
+          ls -lh "${MIRROR_DIR}/"
+
+          echo ">>> 下载 nikki 签名公钥..."
+          # 找 ImageBuilder 的 apk keys 目录并安装公钥
+          APK_KEYS_DIR=$(find imagebuilder -path "*/apk/keys" -type d 2>/dev/null | head -1)
+          if [ -n "${APK_KEYS_DIR}" ]; then
+            wget -q "https://nikkinikki.pages.dev/public-key.pem"                  -O "${APK_KEYS_DIR}/nikki.pem"
+            echo ">>> 公钥已安装：${APK_KEYS_DIR}/nikki.pem"
+          else
+            echo ">>> 未找到 apk keys 目录，跳过公钥安装"
           fi
-          echo ">>> 找到配置文件：${REPO_FILE}"
 
-          echo ">>> 当前内容："
+          echo ">>> 注册本地镜像到 repositories..."
+          cd imagebuilder
+          REPO_FILE=$(find . -maxdepth 2 -name "repositories*" -not -path "*/\.*" | head -1)
+          echo ">>> 使用配置文件：${REPO_FILE}"
+          echo ">>> 追加前内容："
           cat "${REPO_FILE}"
 
-          echo ""
-          echo ">>> 添加 nikki feed..."
-          # APK 格式的 repositories 文件直接写 URL，不用 src/gz 前缀（那是 opkg 格式）
-          echo "${NIKKI_FEED}" >> "${REPO_FILE}"
+          # file:// 绝对路径，apk 追加 {arch}/APKINDEX.tar.gz 后指向正确位置
+          echo "file:///tmp/nikki-mirror" >> "${REPO_FILE}"
 
           echo ""
-          echo ">>> 更新后内容："
+          echo ">>> 追加后内容："
           cat "${REPO_FILE}"
-          echo ">>> nikki feed 添加完成 ✅"
+          echo ">>> nikki 本地镜像注册完成 ✅"
 
       # ---------------------------------------------------------------
       # sing-box 1.13.5 二进制注入
