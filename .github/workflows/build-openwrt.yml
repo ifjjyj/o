@@ -73,33 +73,29 @@ jobs:
 
       # ---------------------------------------------------------------
       # sing-box 1.13.5 二进制注入
-      # 官方提供 openwrt_aarch64_cortex-a53 专属 APK，与 360T7 完全匹配
-      # APK 本质是 tar+gz，用 tar 解包后提取 usr/bin/sing-box
+      # 使用官方 linux-arm64 tar.gz（aarch64_cortex-a53 即 arm64，完全兼容）
       # PACKAGES 里保留官方 sing-box 包（1.12.17）获取 init 脚本等
       # files/ 覆盖让最终固件的 /usr/bin/sing-box 为 1.13.5
       # ---------------------------------------------------------------
-      - name: 🔧 Inject sing-box ${{ env.SINGBOX_VERSION }} binary (openwrt/aarch64_cortex-a53 → files overlay)
+      - name: 🔧 Inject sing-box ${{ env.SINGBOX_VERSION }} binary (linux-arm64 → files overlay)
         run: |
           set -euo pipefail
-          SINGBOX_APK="sing-box_${SINGBOX_VERSION}_openwrt_aarch64_cortex-a53.apk"
-          SINGBOX_URL="https://github.com/SagerNet/sing-box/releases/download/v${SINGBOX_VERSION}/${SINGBOX_APK}"
+          SINGBOX_TAR="sing-box-${SINGBOX_VERSION}-linux-arm64.tar.gz"
+          SINGBOX_URL="https://github.com/SagerNet/sing-box/releases/download/v${SINGBOX_VERSION}/${SINGBOX_TAR}"
 
-          echo ">>> 下载 sing-box ${SINGBOX_VERSION} (openwrt/aarch64_cortex-a53)..."
-          wget -q "${SINGBOX_URL}" -O "${SINGBOX_APK}"
+          echo ">>> 下载 sing-box ${SINGBOX_VERSION} (linux-arm64)..."
+          wget -q "${SINGBOX_URL}" -O "${SINGBOX_TAR}"
 
-          echo ">>> APK 实际格式："
-          file "${SINGBOX_APK}"
-
-          echo ">>> 解包 APK（tar 自动检测压缩格式）..."
+          echo ">>> 解包..."
           mkdir -p singbox_extract
-          tar -xf "${SINGBOX_APK}" -C singbox_extract
+          tar -xzf "${SINGBOX_TAR}" -C singbox_extract
 
-          echo ">>> APK 内容结构："
+          echo ">>> 压缩包内容结构："
           find singbox_extract -type f | sort
 
           SINGBOX_BIN=$(find singbox_extract -type f -name "sing-box" | head -1)
           if [ -z "${SINGBOX_BIN}" ]; then
-            echo "❌ 未在 APK 中找到 sing-box 二进制"
+            echo "❌ 未在压缩包中找到 sing-box 二进制"
             exit 1
           fi
           echo ">>> 找到二进制：${SINGBOX_BIN}"
@@ -237,14 +233,14 @@ jobs:
           ### 内置组件
 
           - **nikki** (luci-app-nikki) \`2026.03.10-r3\`，mihomo 内核已升级至 \`v${MIHOMO_VERSION}\`
-          - **sing-box** \`${SINGBOX_VERSION}\`（官方 openwrt/aarch64_cortex-a53 专属 APK，完全适配 360T7）
+          - **sing-box** \`${SINGBOX_VERSION}\`（官方 linux-arm64 包，aarch64_cortex-a53 完全兼容）
           - **LuCI** 中文界面
           - dnsmasq-full / nftables / kmod-tun / kmod-nft-tproxy 等透明代理依赖
 
           ### 二进制覆盖说明
 
           > nikki APK 自带 mihomo \`1.19.21\`，本固件通过 files overlay 将其替换为 \`${MIHOMO_VERSION}\`。
-          > sing-box APK（官方仓库 \`1.12.17\`）的 init 脚本保留，二进制通过官方 cortex-a53 专属 APK 替换为 \`${SINGBOX_VERSION}\`。
+          > sing-box APK（官方仓库 \`1.12.17\`）的 init 脚本保留，二进制通过官方 linux-arm64 tar.gz 替换为 \`${SINGBOX_VERSION}\`。
 
           ### SHA256 校验
 
