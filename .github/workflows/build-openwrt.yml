@@ -70,7 +70,8 @@ jobs:
 
           echo ""
           echo ">>> 添加 nikki feed..."
-          echo "src/gz nikki ${NIKKI_FEED}" >> "${REPO_FILE}"
+          # APK 格式的 repositories 文件直接写 URL，不用 src/gz 前缀（那是 opkg 格式）
+          echo "${NIKKI_FEED}" >> "${REPO_FILE}"
 
           echo ""
           echo ">>> 更新后内容："
