@@ -107,56 +107,58 @@ jobs:
           echo ">>> 解压后全部文件："
           find /tmp/nikki-feed -type f | sort
 
-          # ---------------------------------------------------------------
-          # 定位 feed 目录（优先找 packages.adb，其次找 *.apk）
-          # ---------------------------------------------------------------
-          FEED_DIR=$(dirname "$(find /tmp/nikki-feed -name "packages.adb" | head -1)")
-          if [ -z "${FEED_DIR}" ] || [ "${FEED_DIR}" = "." ]; then
-            FEED_DIR=$(dirname "$(find /tmp/nikki-feed -name "*.apk" | head -1)")
-          fi
-          if [ -z "${FEED_DIR}" ] || [ "${FEED_DIR}" = "." ]; then
-            echo "❌ 无法定位 feed 目录，解压内容："
-            find /tmp/nikki-feed -type f
+          # 定位含 APK 文件的目录
+          APK_SRC=$(find /tmp/nikki-feed -name "*.apk" | head -1)
+          if [ -z "${APK_SRC}" ]; then
+            echo "❌ tarball 内未找到任何 .apk 文件"
             exit 1
           fi
-          echo ">>> Feed 目录：${FEED_DIR}"
+          FEED_DIR=$(dirname "${APK_SRC}")
+          echo ">>> APK 源目录：${FEED_DIR}"
           ls -lh "${FEED_DIR}/"
 
           # ---------------------------------------------------------------
-          # 若 tarball 内没有 packages.adb，用 apk 工具生成
+          # 第三步：将 nikki APK 复制进 ImageBuilder 内部包目录并重建索引
+          # 不使用外部 file:// feed，直接合并到 ImageBuilder 自身仓库
+          # 这样 make image 时可直接找到 nikki 包，无需额外 feed 注册
           # ---------------------------------------------------------------
-          if [ ! -f "${FEED_DIR}/packages.adb" ]; then
-            echo ">>> tarball 内无 packages.adb，开始生成..."
-            APK_BIN=$(find imagebuilder -name "apk" -type f -executable | head -1)
-            echo ">>> apk 工具：${APK_BIN}，版本：$("${APK_BIN}" --version)"
-            cd "${FEED_DIR}"
-            "${OLDPWD}/${APK_BIN}" mkndx \
-              --output packages.adb \
-              --description "nikki local mirror" \
-              *.apk
-            cd "${OLDPWD}"
-            echo ">>> packages.adb 生成完成 ✅"
+          echo ">>> [3/3] 合并 nikki APK 到 ImageBuilder 包目录..."
+
+          # 找到 ImageBuilder 内部已有 packages.adb 的目录（即 base 包仓库）
+          IB_PKG_DIR=$(find imagebuilder/packages -name "packages.adb" -type f \
+                         2>/dev/null | head -1 | xargs -r dirname)
+          if [ -z "${IB_PKG_DIR}" ]; then
+            # 不存在则按架构新建
+            IB_PKG_DIR="imagebuilder/packages/${ARCH}/base"
+            mkdir -p "${IB_PKG_DIR}"
+            echo ">>> 新建包目录：${IB_PKG_DIR}"
           else
-            echo ">>> tarball 内已含 packages.adb，直接使用 ✅"
+            echo ">>> 找到现有包目录：${IB_PKG_DIR}"
           fi
 
-          # ---------------------------------------------------------------
-          # 第三步：注册 feed 到 repositories
-          # ---------------------------------------------------------------
-          echo ">>> [3/3] 注册 feed 到 repositories..."
-          cd imagebuilder
-          REPO_FILE=$(find . -maxdepth 2 -name "repositories*" \
-                        -not -path "*/\.*" | head -1)
-          echo ">>> 配置文件：${REPO_FILE}"
-          echo ">>> 追加前："
-          cat "${REPO_FILE}"
+          # 复制所有 nikki APK
+          cp "${FEED_DIR}"/*.apk "${IB_PKG_DIR}/"
+          echo ">>> 已复制以下 APK 至 ${IB_PKG_DIR}："
+          ls -lh "${IB_PKG_DIR}"/*.apk
 
-          echo "file://${FEED_DIR}" >> "${REPO_FILE}"
+          # 用 ImageBuilder 自带 apk 工具重建索引
+          APK_BIN=$(find imagebuilder -name "apk" -type f -executable | head -1)
+          if [ -z "${APK_BIN}" ]; then
+            echo "❌ 未找到 apk 工具"
+            exit 1
+          fi
+          echo ">>> apk 工具：${APK_BIN}，版本：$("${APK_BIN}" --version)"
 
-          echo ""
-          echo ">>> 追加后："
-          cat "${REPO_FILE}"
-          echo ">>> nikki feed 注册完成 ✅"
+          cd "${IB_PKG_DIR}"
+          "${OLDPWD}/${APK_BIN}" mkndx \
+            --output packages.adb \
+            --description "base+nikki" \
+            *.apk
+          cd "${OLDPWD}"
+
+          echo ">>> 索引重建完成，当前包目录内容："
+          ls -lh "${IB_PKG_DIR}/"
+          echo ">>> nikki APK 合并完成 ✅"
 
       - name: 🔧 Inject sing-box ${{ env.SINGBOX_VERSION }} binary (linux-arm64 → files overlay)
         run: |
