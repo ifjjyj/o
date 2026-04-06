@@ -48,7 +48,7 @@ jobs:
           mv "${BUILDER}" imagebuilder
           echo ">>> ImageBuilder 准备完成"
 
-      - name: 🔌 Download nikki packages into ImageBuilder local packages dir
+      - name: 🔌 Download nikki packages & build local APK index
         run: |
           set -euo pipefail
           cd imagebuilder
@@ -62,20 +62,47 @@ jobs:
 
           mkdir -p packages
 
-          echo ">>> 下载 nikki apk 包到本地 packages 目录..."
-          wget -q "${NIKKI_FEED}/nikki-2026.03.10-r3.apk"             -O packages/nikki-2026.03.10-r3.apk
-          wget -q "${NIKKI_FEED}/luci-app-nikki-1.25.3-r1.apk"        -O packages/luci-app-nikki-1.25.3-r1.apk
+          echo ">>> 下载 nikki apk 包..."
+          wget -q "${NIKKI_FEED}/nikki-2026.03.10-r3.apk" \
+               -O packages/nikki-2026.03.10-r3.apk
+          wget -q "${NIKKI_FEED}/luci-app-nikki-1.25.3-r1.apk" \
+               -O packages/luci-app-nikki-1.25.3-r1.apk
           wget -q "${NIKKI_FEED}/luci-i18n-nikki-zh-cn-26.088.44343~a20a48b.apk" \
                -O "packages/luci-i18n-nikki-zh-cn-26.088.44343~a20a48b.apk"
 
           echo ">>> 下载完成，packages 目录内容："
           ls -lh packages/*.apk
 
+          # ---------------------------------------------------------------
+          # OpenWrt 25.x 使用 APK 包管理器，本地包目录必须有 packages.adb 索引
+          # 否则 ImageBuilder 无法识别本地包（产生大量 "No such file" 警告并报错）
+          # ImageBuilder 自带 apk 工具，路径在 staging_dir/host/bin/apk
+          # ---------------------------------------------------------------
+          echo ">>> 查找 ImageBuilder 自带 apk 工具..."
+          APK_BIN=$(find staging_dir/host/bin -name "apk" -type f 2>/dev/null | head -1)
+          if [ -z "${APK_BIN}" ]; then
+            APK_BIN=$(find . -name "apk" -type f 2>/dev/null | grep -v "\.apk" | head -1)
+          fi
+          if [ -z "${APK_BIN}" ]; then
+            echo "❌ 未找到 apk 工具，无法生成索引"
+            exit 1
+          fi
+          echo ">>> 使用 apk 工具：${APK_BIN}"
+
+          echo ">>> 生成本地 packages.adb 索引..."
+          ${APK_BIN} index \
+            --allow-untrusted \
+            --output packages/packages.adb \
+            packages/*.apk
+
+          echo ">>> 索引生成完成："
+          ls -lh packages/packages.adb
+
       # ---------------------------------------------------------------
       # sing-box 1.13.5 二进制注入
       # 使用官方 linux-arm64 tar.gz（aarch64_cortex-a53 即 arm64，完全兼容）
       # PACKAGES 里保留官方 sing-box 包（1.12.17）获取 init 脚本等
-      # files/ 覆盖让最终固件的 /usr/bin/sing-box 为 1.13.5
+      # 提取后重命名为 sing-box，覆盖到 files/usr/bin/sing-box
       # ---------------------------------------------------------------
       - name: 🔧 Inject sing-box ${{ env.SINGBOX_VERSION }} binary (linux-arm64 → files overlay)
         run: |
@@ -86,13 +113,17 @@ jobs:
           echo ">>> 下载 sing-box ${SINGBOX_VERSION} (linux-arm64)..."
           wget -q "${SINGBOX_URL}" -O "${SINGBOX_TAR}"
 
-          echo ">>> 解包..."
+          echo ">>> 实际文件格式："
+          file "${SINGBOX_TAR}"
+
+          echo ">>> 解包 tar.gz..."
           mkdir -p singbox_extract
           tar -xzf "${SINGBOX_TAR}" -C singbox_extract
 
-          echo ">>> 压缩包内容结构："
+          echo ">>> 包内容结构："
           find singbox_extract -type f | sort
 
+          # tar 包内路径类似 sing-box-1.13.5-linux-arm64/sing-box，提取后重命名为 sing-box
           SINGBOX_BIN=$(find singbox_extract -type f -name "sing-box" | head -1)
           if [ -z "${SINGBOX_BIN}" ]; then
             echo "❌ 未在压缩包中找到 sing-box 二进制"
@@ -100,7 +131,7 @@ jobs:
           fi
           echo ">>> 找到二进制：${SINGBOX_BIN}"
 
-          echo ">>> 注入到 files overlay → /usr/bin/sing-box"
+          echo ">>> 注入到 files overlay → /usr/bin/sing-box（重命名为 sing-box）"
           mkdir -p files/usr/bin
           cp "${SINGBOX_BIN}" files/usr/bin/sing-box
           chmod +x files/usr/bin/sing-box
@@ -111,20 +142,22 @@ jobs:
 
       # ---------------------------------------------------------------
       # mihomo 1.19.22 二进制注入
-      # nikki 的 mihomo 核心位于 /usr/bin/mihomo（来自 nikki APK 包）
       # 官方 releases 格式：mihomo-linux-arm64-v{version}.gz（单文件 gzip）
-      # 下载后 gunzip 直接得到二进制，覆盖到 files/usr/bin/mihomo
+      # 下载后 gunzip 得到 ./mihomo，重命名为 mihomo 覆盖到 files/usr/bin/mihomo
       # ---------------------------------------------------------------
       - name: 🔧 Inject mihomo ${{ env.MIHOMO_VERSION }} binary (linux/arm64 → files overlay)
         run: |
           set -euo pipefail
-          MIHOMO_URL="https://github.com/MetaCubeX/mihomo/releases/download/v${MIHOMO_VERSION}/mihomo-linux-arm64-v${MIHOMO_VERSION}.gz"
+          MIHOMO_GZ="mihomo-linux-arm64-v${MIHOMO_VERSION}.gz"
+          MIHOMO_URL="https://github.com/MetaCubeX/mihomo/releases/download/v${MIHOMO_VERSION}/${MIHOMO_GZ}"
 
           echo ">>> 下载 mihomo ${MIHOMO_VERSION} (linux/arm64)..."
           wget -q "${MIHOMO_URL}" -O mihomo.gz
-          gunzip -f mihomo.gz  # 解压得到 ./mihomo 二进制
 
-          echo ">>> 注入到 files overlay → /usr/bin/mihomo"
+          echo ">>> 解压 gz（gunzip 后重命名为 mihomo）..."
+          gunzip -f mihomo.gz   # 解压得到 ./mihomo 二进制
+
+          echo ">>> 注入到 files overlay → /usr/bin/mihomo（重命名为 mihomo）"
           mkdir -p files/usr/bin
           cp mihomo files/usr/bin/mihomo
           chmod +x files/usr/bin/mihomo
@@ -233,7 +266,7 @@ jobs:
           ### 内置组件
 
           - **nikki** (luci-app-nikki) \`2026.03.10-r3\`，mihomo 内核已升级至 \`v${MIHOMO_VERSION}\`
-          - **sing-box** \`${SINGBOX_VERSION}\`（官方 linux-arm64 包，aarch64_cortex-a53 完全兼容）
+          - **sing-box** \`${SINGBOX_VERSION}\`（官方 linux-arm64，完全适配 360T7/aarch64_cortex-a53）
           - **LuCI** 中文界面
           - dnsmasq-full / nftables / kmod-tun / kmod-nft-tproxy 等透明代理依赖
 
