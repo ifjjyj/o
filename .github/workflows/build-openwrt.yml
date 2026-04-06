@@ -87,9 +87,12 @@ jobs:
           echo ">>> 下载 sing-box ${SINGBOX_VERSION} (openwrt/aarch64_cortex-a53)..."
           wget -q "${SINGBOX_URL}" -O "${SINGBOX_APK}"
 
-          echo ">>> 从 APK 中提取二进制（OpenWrt APK 为 zip 格式）..."
+          echo ">>> APK 实际格式："
+          file "${SINGBOX_APK}"
+
+          echo ">>> 解包 APK（tar 自动检测压缩格式）..."
           mkdir -p singbox_extract
-          unzip -q "${SINGBOX_APK}" -d singbox_extract
+          tar -xf "${SINGBOX_APK}" -C singbox_extract
 
           echo ">>> APK 内容结构："
           find singbox_extract -type f | sort
