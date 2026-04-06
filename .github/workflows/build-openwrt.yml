@@ -64,7 +64,7 @@ jobs:
             echo "✅ ImageBuilder 新鲜下载（版本 ${OPENWRT_VERSION}）"
           fi
 
-      - name: 🔌 Setup nikki feed — inject packages into ImageBuilder local repo
+      - name: 🔌 Setup nikki — inject packages into ImageBuilder local repo
         run: |
           set -euo pipefail
 
@@ -72,26 +72,21 @@ jobs:
           NIKKI_TAR="nikki_${ARCH}-openwrt-${OPENWRT_MAJOR}.tar.gz"
           NIKKI_URL="https://github.com/nikkinikki-org/OpenWrt-nikki/releases/latest/download/${NIKKI_TAR}"
 
-          # ---------------------------------------------------------------
-          # 第一步：安装 nikki 签名公钥到 ImageBuilder 的 apk keys 目录
-          # ---------------------------------------------------------------
+          # 1. 安装 nikki 签名公钥
           echo ">>> [1/5] 安装 nikki 签名公钥..."
           APK_KEYS_DIR=$(find imagebuilder -path "*/apk/keys" -type d | head -1)
           if [ -z "${APK_KEYS_DIR}" ]; then
             APK_KEYS_DIR=$(find imagebuilder -name "keys" -type d | head -1)
           fi
           if [ -z "${APK_KEYS_DIR}" ]; then
-            echo "❌ 未找到任何 keys 目录"
-            exit 1
+            echo "❌ 未找到任何 keys 目录"; exit 1
           fi
           echo ">>> keys 目录：${APK_KEYS_DIR}"
           wget -q "https://nikkinikki.pages.dev/public-key.pem" \
                -O "${APK_KEYS_DIR}/nikki.pem"
           echo ">>> 公钥已安装 ✅"
 
-          # ---------------------------------------------------------------
-          # 第二步：下载并解压 nikki release tarball
-          # ---------------------------------------------------------------
+          # 2. 下载并解压 nikki release tarball
           echo ">>> [2/5] 下载 ${NIKKI_TAR}..."
           wget --progress=bar:force "${NIKKI_URL}" -O nikki-release.tar.gz
           mkdir -p /tmp/nikki-feed
@@ -106,53 +101,28 @@ jobs:
           FEED_SRC=$(dirname "${APK_SRC}")
           echo ">>> APK 源目录：${FEED_SRC}"
 
-          # ---------------------------------------------------------------
-          # 第三步：找到 ImageBuilder 本地 packages 目录并把 nikki 包并入
-          # 这样 nikki 走官方 feed 的信任链，完全不需要外部 feed 注册
-          # ---------------------------------------------------------------
+          # 3. 找到 ImageBuilder 本地 packages 目录
           echo ">>> [3/5] 定位 ImageBuilder 本地 packages 目录..."
           LOCAL_PKG_DIR=$(find imagebuilder/packages -type d \
                           -name "${ARCH}" 2>/dev/null | head -1)
           if [ -z "${LOCAL_PKG_DIR}" ]; then
-            # 部分版本目录结构不同，退而求其次取 packages 根目录
             LOCAL_PKG_DIR=$(find imagebuilder -maxdepth 2 \
                             -type d -name "packages" | head -1)
           fi
           if [ -z "${LOCAL_PKG_DIR}" ]; then
-            echo "❌ 未找到 ImageBuilder packages 目录"
-            exit 1
+            echo "❌ 未找到 ImageBuilder packages 目录"; exit 1
           fi
           echo ">>> 本地 packages 目录：${LOCAL_PKG_DIR}"
 
-          echo ">>> [4/5] 复制 nikki .apk 文件到本地 packages..."
+          # 4. 复制 nikki .apk 到本地 packages
+          echo ">>> [4/5] 复制 nikki .apk 文件..."
           cp "${FEED_SRC}"/*.apk "${LOCAL_PKG_DIR}/"
-          echo ">>> 复制完成，当前 packages 内容（nikki 相关）："
+          echo ">>> nikki 相关包："
           ls -lh "${LOCAL_PKG_DIR}/" | grep -i nikki || true
 
-          # ---------------------------------------------------------------
-          # 第四步：找到 ImageBuilder 内置 apk 二进制，重新生成 APKINDEX
-          # 用官方 apk index 命令重建索引，让包带上本地信任签名
-          # ---------------------------------------------------------------
-          echo ">>> [5/5] 重新生成本地 APKINDEX..."
-          APK_BIN=$(find imagebuilder -name "apk" -type f -executable | head -1)
-          if [ -z "${APK_BIN}" ]; then
-            echo "⚠️  未找到 ImageBuilder 内置 apk，尝试系统 apk..."
-            APK_BIN=$(which apk 2>/dev/null || true)
-          fi
-
-          if [ -n "${APK_BIN}" ]; then
-            echo ">>> 使用 apk 二进制：${APK_BIN}"
-            # apk index 语法：apk index --allow-untrusted -o OUTPUT INPUT_APKS
-            "${APK_BIN}" index \
-              --allow-untrusted \
-              -o "${LOCAL_PKG_DIR}/APKINDEX.tar.gz" \
-              "${LOCAL_PKG_DIR}"/*.apk \
-              2>&1 || echo "⚠️  apk index 返回非零，尝试 Python 回退方案..."
-          fi
-
-          # 无论 apk index 是否成功，都用 Python 脚本重建一次作为保底
-          # Python 版本生成的 APKINDEX 格式完全符合 apk 规范
-          python3 - "${LOCAL_PKG_DIR}" << 'PYEOF'
+          # 5. 重建 APKINDEX（用独立 Python 脚本文件，避免 YAML heredoc 冲突）
+          echo ">>> [5/5] 重建 APKINDEX..."
+          cat > /tmp/gen_apkindex.py << 'PYEOF'
 import tarfile, io, os, glob, hashlib, base64, sys
 
 def parse_pkginfo(content):
@@ -177,25 +147,25 @@ for apk_path in sorted(glob.glob('*.apk')):
             hashlib.sha1(open(apk_path, 'rb').read()).digest()
         ).decode()
         lines = [
-            f"C:{chk}",
-            f"P:{f.get('pkgname', '')}",
-            f"V:{f.get('pkgver', '')}",
-            f"A:{f.get('arch', '')}",
-            f"S:{os.path.getsize(apk_path)}",
-            f"I:{f.get('size', '0')}",
-            f"T:{f.get('pkgdesc', '')}",
-            f"U:{f.get('url', '')}",
-            f"L:{f.get('license', '')}",
+            'C:' + chk,
+            'P:' + f.get('pkgname', ''),
+            'V:' + f.get('pkgver', ''),
+            'A:' + f.get('arch', ''),
+            'S:' + str(os.path.getsize(apk_path)),
+            'I:' + f.get('size', '0'),
+            'T:' + f.get('pkgdesc', ''),
+            'U:' + f.get('url', ''),
+            'L:' + f.get('license', ''),
         ]
-        for key, tag in [('origin', 'o'), ('maintainer', 'm'),
-                          ('builddate', 't'), ('depend', 'D'), ('provides', 'p')]:
+        for key, tag in [('origin','o'),('maintainer','m'),
+                          ('builddate','t'),('depend','D'),('provides','p')]:
             if key in f:
-                lines.append(f"{tag}:{f[key]}")
+                lines.append(tag + ':' + f[key])
         lines.append('')
         entries.append('\n'.join(lines))
-        print(f"  indexed: {f.get('pkgname', apk_path)}")
+        print('  indexed: ' + f.get('pkgname', apk_path))
     except Exception as e:
-        print(f"  warning: {apk_path}: {e}")
+        print('  warning: ' + apk_path + ': ' + str(e))
 
 idx = '\n'.join(entries).encode()
 buf = io.BytesIO()
@@ -203,15 +173,15 @@ with tarfile.open(fileobj=buf, mode='w:gz') as tar:
     info = tarfile.TarInfo(name='APKINDEX')
     info.size = len(idx)
     tar.addfile(info, io.BytesIO(idx))
-with open('APKINDEX.tar.gz', 'wb') as f:
-    f.write(buf.getvalue())
-print(f"APKINDEX.tar.gz 重建完成，共 {len(entries)} 个包 ✅")
+with open('APKINDEX.tar.gz', 'wb') as fout:
+    fout.write(buf.getvalue())
+print('APKINDEX.tar.gz 重建完成，共 ' + str(len(entries)) + ' 个包 ✅')
 PYEOF
+          python3 /tmp/gen_apkindex.py "${LOCAL_PKG_DIR}"
+          echo ">>> nikki 包已并入本地 feed ✅"
+          echo ">>> packages 目录 .apk 数量：$(ls ${LOCAL_PKG_DIR}/*.apk | wc -l)"
 
-          echo ">>> nikki 包已并入本地 feed，无需外部 feed 注册 ✅"
-          echo ">>> 当前 packages 目录文件数：$(ls ${LOCAL_PKG_DIR}/*.apk | wc -l)"
-
-      - name: 🔧 Inject sing-box ${{ env.SINGBOX_VERSION }} binary (linux-arm64 → files overlay)
+      - name: 🔧 Inject sing-box ${{ env.SINGBOX_VERSION }} binary
         run: |
           set -euo pipefail
           SINGBOX_TAR="sing-box-${SINGBOX_VERSION}-linux-arm64.tar.gz"
@@ -219,24 +189,21 @@ PYEOF
 
           echo ">>> 下载 sing-box ${SINGBOX_VERSION} (linux-arm64)..."
           wget -q "${SINGBOX_URL}" -O "${SINGBOX_TAR}"
-
           mkdir -p singbox_extract
           tar -xzf "${SINGBOX_TAR}" -C singbox_extract
 
           SINGBOX_BIN=$(find singbox_extract -type f -name "sing-box" | head -1)
           if [ -z "${SINGBOX_BIN}" ]; then
-            echo "❌ 未在压缩包中找到 sing-box 二进制"
-            exit 1
+            echo "❌ 未在压缩包中找到 sing-box 二进制"; exit 1
           fi
 
           mkdir -p files/usr/bin
           cp "${SINGBOX_BIN}" files/usr/bin/sing-box
           chmod +x files/usr/bin/sing-box
-
           file files/usr/bin/sing-box
           echo ">>> sing-box 注入完成 ✅"
 
-      - name: 🔧 Inject mihomo ${{ env.MIHOMO_VERSION }} binary (linux/arm64 → files overlay)
+      - name: 🔧 Inject mihomo ${{ env.MIHOMO_VERSION }} binary
         run: |
           set -euo pipefail
           MIHOMO_GZ="mihomo-linux-arm64-v${MIHOMO_VERSION}.gz"
@@ -245,11 +212,9 @@ PYEOF
           echo ">>> 下载 mihomo ${MIHOMO_VERSION} (linux/arm64)..."
           wget -q "${MIHOMO_URL}" -O mihomo.gz
           gunzip -f mihomo.gz
-
           mkdir -p files/usr/bin
           cp mihomo files/usr/bin/mihomo
           chmod +x files/usr/bin/mihomo
-
           file files/usr/bin/mihomo
           echo ">>> mihomo 注入完成 ✅"
 
@@ -268,32 +233,25 @@ PYEOF
           set -euo pipefail
           cd imagebuilder
 
-          # ---------------------------------------------------------------
           # 找到 ImageBuilder 内置 apk 真实路径
-          # ---------------------------------------------------------------
           APK_REAL=$(find "$(pwd)" -name "apk" -type f -executable \
                      ! -path "/tmp/*" | head -1)
           if [ -z "${APK_REAL}" ]; then
-            echo "❌ 未找到 ImageBuilder 内置 apk 二进制"
-            exit 1
+            echo "❌ 未找到 ImageBuilder 内置 apk 二进制"; exit 1
           fi
           echo ">>> 真实 apk 路径：${APK_REAL}"
 
-          # ---------------------------------------------------------------
-          # 创建 wrapper：强制附加 --allow-untrusted
-          # 同时通过 Make 变量 APK= 直接覆盖 Makefile 里的 apk 调用路径，
-          # PATH 前置作为双重保险。
-          # ---------------------------------------------------------------
+          # 创建 wrapper 脚本（注意：这里不能用 << heredoc，改用 printf）
           mkdir -p /tmp/apk-wrapper
-          cat > /tmp/apk-wrapper/apk << WRAPEOF
-#!/bin/sh
-exec "${APK_REAL}" --allow-untrusted "\$@"
-WRAPEOF
+          printf '#!/bin/sh\nexec "%s" --allow-untrusted "$@"\n' \
+            "${APK_REAL}" > /tmp/apk-wrapper/apk
           chmod +x /tmp/apk-wrapper/apk
+
+          echo ">>> wrapper 内容："
+          cat /tmp/apk-wrapper/apk
 
           export PATH="/tmp/apk-wrapper:${PATH}"
           echo ">>> which apk：$(which apk)"
-          echo ">>> wrapper 测试：$(apk --version 2>&1 || true)"
 
           echo ">>> 开始构建固件，Profile: ${PROFILE}，时间: $(date)"
           echo "---"
@@ -324,8 +282,7 @@ WRAPEOF
           cd imagebuilder
           SYSUPGRADE=$(ls bin/targets/mediatek/filogic/*sysupgrade* 2>/dev/null)
           if [ -z "$SYSUPGRADE" ]; then
-            echo "❌ 未找到 sysupgrade 固件"
-            exit 1
+            echo "❌ 未找到 sysupgrade 固件"; exit 1
           fi
           ls -lh bin/targets/mediatek/filogic/
           echo ""
