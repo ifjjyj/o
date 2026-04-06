@@ -16,7 +16,7 @@ env:
   MIHOMO_VERSION: "1.19.22"
 
 permissions:
-  contents: write   # 允许创建 Release 和上传 Assets
+  contents: write
 
 jobs:
   build:
@@ -55,32 +55,48 @@ jobs:
           OPENWRT_MAJOR="${OPENWRT_VERSION%.*}"
           NIKKI_BASE="https://nikkinikki.pages.dev/openwrt-${OPENWRT_MAJOR}/${ARCH}/nikki"
 
-          # ---------------------------------------------------------------
-          # ImageBuilder 的 apk 工具在解析 repositories 文件时会自动在
-          # URL 末尾追加 "{arch}/APKINDEX.tar.gz"
-          # 因此不能直接用 nikki 的 feed URL（会变成 .../nikki/arch/APKINDEX）
-          # 解决方法：建立本地镜像，目录结构为 mirror/{arch}/
-          # 这样 file:///tmp/nikki-mirror → 追加 arch/APKINDEX.tar.gz → 正确路径
-          # ---------------------------------------------------------------
           MIRROR_DIR="/tmp/nikki-mirror/${ARCH}"
           mkdir -p "${MIRROR_DIR}"
 
           echo ">>> 下载 nikki APK 包..."
-          wget -q "${NIKKI_BASE}/nikki-2026.03.10-r3.apk"                -O "${MIRROR_DIR}/nikki-2026.03.10-r3.apk"
-          wget -q "${NIKKI_BASE}/luci-app-nikki-1.25.3-r1.apk"                -O "${MIRROR_DIR}/luci-app-nikki-1.25.3-r1.apk"
-          wget -q "${NIKKI_BASE}/luci-i18n-nikki-zh-cn-26.088.44343~a20a48b.apk"                -O "${MIRROR_DIR}/luci-i18n-nikki-zh-cn-26.088.44343~a20a48b.apk"
+          wget -q "${NIKKI_BASE}/nikki-2026.03.10-r3.apk" \
+               -O "${MIRROR_DIR}/nikki-2026.03.10-r3.apk"
+          wget -q "${NIKKI_BASE}/luci-app-nikki-1.25.3-r1.apk" \
+               -O "${MIRROR_DIR}/luci-app-nikki-1.25.3-r1.apk"
+          wget -q "${NIKKI_BASE}/luci-i18n-nikki-zh-cn-26.088.44343~a20a48b.apk" \
+               -O "${MIRROR_DIR}/luci-i18n-nikki-zh-cn-26.088.44343~a20a48b.apk"
 
           echo ">>> 下载 APKINDEX.tar.gz..."
-          wget -q "${NIKKI_BASE}/APKINDEX.tar.gz"                -O "${MIRROR_DIR}/APKINDEX.tar.gz"
+          wget -q "${NIKKI_BASE}/APKINDEX.tar.gz" \
+               -O "${MIRROR_DIR}/APKINDEX.tar.gz"
+
+          echo ">>> 验证 APKINDEX.tar.gz 格式..."
+          echo "文件类型："
+          file "${MIRROR_DIR}/APKINDEX.tar.gz"
+          echo "文件头（hex）："
+          xxd "${MIRROR_DIR}/APKINDEX.tar.gz" | head -5
+
+          if ! tar -tzf "${MIRROR_DIR}/APKINDEX.tar.gz" > /dev/null 2>&1; then
+            echo "❌ APKINDEX.tar.gz 不是合法 tar.gz，尝试直接使用在线 feed..."
+            # 回退：直接写在线 feed URL，跳过本地镜像
+            ONLINE_FEED="https://nikkinikki.pages.dev/openwrt-${OPENWRT_MAJOR}/${ARCH}/nikki"
+            cd imagebuilder
+            REPO_FILE=$(find . -maxdepth 2 -name "repositories*" -not -path "*/\.*" | head -1)
+            echo "${ONLINE_FEED}" >> "${REPO_FILE}"
+            echo ">>> 已回退到在线 feed：${ONLINE_FEED}"
+            cat "${REPO_FILE}"
+            exit 0
+          fi
+          echo ">>> APKINDEX.tar.gz 验证通过 ✅"
 
           echo ">>> 本地镜像内容："
           ls -lh "${MIRROR_DIR}/"
 
           echo ">>> 下载 nikki 签名公钥..."
-          # 找 ImageBuilder 的 apk keys 目录并安装公钥
           APK_KEYS_DIR=$(find imagebuilder -path "*/apk/keys" -type d 2>/dev/null | head -1)
           if [ -n "${APK_KEYS_DIR}" ]; then
-            wget -q "https://nikkinikki.pages.dev/public-key.pem"                  -O "${APK_KEYS_DIR}/nikki.pem"
+            wget -q "https://nikkinikki.pages.dev/public-key.pem" \
+                 -O "${APK_KEYS_DIR}/nikki.pem"
             echo ">>> 公钥已安装：${APK_KEYS_DIR}/nikki.pem"
           else
             echo ">>> 未找到 apk keys 目录，跳过公钥安装"
@@ -93,20 +109,14 @@ jobs:
           echo ">>> 追加前内容："
           cat "${REPO_FILE}"
 
-          # file:// 绝对路径，apk 追加 {arch}/APKINDEX.tar.gz 后指向正确位置
-          echo "file:///tmp/nikki-mirror" >> "${REPO_FILE}"
+          # 直接指向含有 APKINDEX.tar.gz 的目录层级
+          echo "file:///tmp/nikki-mirror/${ARCH}" >> "${REPO_FILE}"
 
           echo ""
           echo ">>> 追加后内容："
           cat "${REPO_FILE}"
           echo ">>> nikki 本地镜像注册完成 ✅"
 
-      # ---------------------------------------------------------------
-      # sing-box 1.13.5 二进制注入
-      # 使用官方 linux-arm64 tar.gz（aarch64_cortex-a53 即 arm64，完全兼容）
-      # PACKAGES 里保留官方 sing-box 包（1.12.17）获取 init 脚本等
-      # 提取后重命名为 sing-box，覆盖到 files/usr/bin/sing-box
-      # ---------------------------------------------------------------
       - name: 🔧 Inject sing-box ${{ env.SINGBOX_VERSION }} binary (linux-arm64 → files overlay)
         run: |
           set -euo pipefail
@@ -123,7 +133,6 @@ jobs:
           echo ">>> 包内容结构："
           find singbox_extract -type f | sort
 
-          # tar 包内路径类似 sing-box-1.13.5-linux-arm64/sing-box，提取后重命名为 sing-box
           SINGBOX_BIN=$(find singbox_extract -type f -name "sing-box" | head -1)
           if [ -z "${SINGBOX_BIN}" ]; then
             echo "❌ 未在压缩包中找到 sing-box 二进制"
@@ -140,11 +149,6 @@ jobs:
           file files/usr/bin/sing-box
           echo ">>> sing-box 注入完成 ✅"
 
-      # ---------------------------------------------------------------
-      # mihomo 1.19.22 二进制注入
-      # 官方 releases 格式：mihomo-linux-arm64-v{version}.gz（单文件 gzip）
-      # 下载后 gunzip 得到二进制，重命名为 mihomo 覆盖到 files/usr/bin/mihomo
-      # ---------------------------------------------------------------
       - name: 🔧 Inject mihomo ${{ env.MIHOMO_VERSION }} binary (linux/arm64 → files overlay)
         run: |
           set -euo pipefail
