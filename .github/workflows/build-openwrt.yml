@@ -152,58 +152,60 @@ jobs:
           echo ">>> packages.adb 生成完成 ✅"
 
           # 格式二：APKINDEX.tar.gz（旧格式，file:// 优先查找）
-          python3 << 'PYEOF'
-import tarfile, io, os, glob, hashlib, base64
+          # 写入脚本到临时文件再执行（规避 YAML 对 << 的误解析）
+          cat > /tmp/gen_apkindex.py << 'EOF'
+          import tarfile, io, os, glob, hashlib, base64
 
-def parse_pkginfo(content):
-    fields = {}
-    for line in content.splitlines():
-        if line.startswith('#') or '=' not in line:
-            continue
-        k, v = line.split('=', 1)
-        fields[k.strip()] = v.strip()
-    return fields
+          def parse_pkginfo(content):
+              fields = {}
+              for line in content.splitlines():
+                  if line.startswith('#') or '=' not in line:
+                      continue
+                  k, v = line.split('=', 1)
+                  fields[k.strip()] = v.strip()
+              return fields
 
-entries = []
-for apk_path in sorted(glob.glob('*.apk')):
-    try:
-        with tarfile.open(apk_path, 'r:gz') as apk:
-            pi = apk.extractfile('.PKGINFO').read().decode()
-        f = parse_pkginfo(pi)
-        chk = 'Q1' + base64.b64encode(
-            hashlib.sha1(open(apk_path,'rb').read()).digest()
-        ).decode()
-        lines = [
-            f"C:{chk}",
-            f"P:{f.get('pkgname','')}",
-            f"V:{f.get('pkgver','')}",
-            f"A:{f.get('arch','')}",
-            f"S:{os.path.getsize(apk_path)}",
-            f"I:{f.get('size','0')}",
-            f"T:{f.get('pkgdesc','')}",
-            f"U:{f.get('url','')}",
-            f"L:{f.get('license','')}",
-        ]
-        for key, tag in [('origin','o'),('maintainer','m'),
-                         ('builddate','t'),('depend','D'),('provides','p')]:
-            if key in f:
-                lines.append(f"{tag}:{f[key]}")
-        lines.append('')
-        entries.append('\n'.join(lines))
-        print(f"  indexed: {f.get('pkgname',apk_path)}")
-    except Exception as e:
-        print(f"  warning: {apk_path}: {e}")
+          entries = []
+          for apk_path in sorted(glob.glob('*.apk')):
+              try:
+                  with tarfile.open(apk_path, 'r:gz') as apk:
+                      pi = apk.extractfile('.PKGINFO').read().decode()
+                  f = parse_pkginfo(pi)
+                  chk = 'Q1' + base64.b64encode(
+                      hashlib.sha1(open(apk_path,'rb').read()).digest()
+                  ).decode()
+                  lines = [
+                      f"C:{chk}",
+                      f"P:{f.get('pkgname','')}",
+                      f"V:{f.get('pkgver','')}",
+                      f"A:{f.get('arch','')}",
+                      f"S:{os.path.getsize(apk_path)}",
+                      f"I:{f.get('size','0')}",
+                      f"T:{f.get('pkgdesc','')}",
+                      f"U:{f.get('url','')}",
+                      f"L:{f.get('license','')}",
+                  ]
+                  for key, tag in [('origin','o'),('maintainer','m'),
+                                   ('builddate','t'),('depend','D'),('provides','p')]:
+                      if key in f:
+                          lines.append(f"{tag}:{f[key]}")
+                  lines.append('')
+                  entries.append('\n'.join(lines))
+                  print(f"  indexed: {f.get('pkgname',apk_path)}")
+              except Exception as e:
+                  print(f"  warning: {apk_path}: {e}")
 
-idx = '\n'.join(entries).encode()
-buf = io.BytesIO()
-with tarfile.open(fileobj=buf, mode='w:gz') as tar:
-    info = tarfile.TarInfo(name='APKINDEX')
-    info.size = len(idx)
-    tar.addfile(info, io.BytesIO(idx))
-with open('APKINDEX.tar.gz', 'wb') as f:
-    f.write(buf.getvalue())
-print(f"APKINDEX.tar.gz 生成完成，共 {len(entries)} 个包 ✅")
-PYEOF
+          idx = '\n'.join(entries).encode()
+          buf = io.BytesIO()
+          with tarfile.open(fileobj=buf, mode='w:gz') as tar:
+              info = tarfile.TarInfo(name='APKINDEX')
+              info.size = len(idx)
+              tar.addfile(info, io.BytesIO(idx))
+          with open('APKINDEX.tar.gz', 'wb') as f:
+              f.write(buf.getvalue())
+          print(f"APKINDEX.tar.gz 生成完成，共 {len(entries)} 个包 ✅")
+          EOF
+          python3 /tmp/gen_apkindex.py
 
           cd "${OLDPWD}"
           echo ">>> 索引文件："
