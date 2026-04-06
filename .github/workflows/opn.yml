@@ -71,7 +71,6 @@ jobs:
           OPENWRT_BRANCH="openwrt-${OPENWRT_VERSION%.*}"
           NIKKI_FEED_URL="${NIKKI_BASE}/${OPENWRT_BRANCH}/${ARCH}/nikki/packages.adb"
 
-          # 1. 安装 nikki 签名公钥
           echo ">>> [1/2] 安装 nikki 签名公钥..."
           APK_KEYS_DIR=$(find imagebuilder -path "*/apk/keys" -type d | head -1)
           if [ -z "${APK_KEYS_DIR}" ]; then
@@ -85,7 +84,6 @@ jobs:
                -O "${APK_KEYS_DIR}/nikki.pem"
           echo ">>> 公钥已安装 ✅"
 
-          # 2. 注册 nikki feed
           echo ">>> [2/2] 注册 nikki feed..."
           REPO_CONF=$(find imagebuilder -maxdepth 2 \
                       -name "repositories.conf" | head -1)
@@ -186,16 +184,6 @@ jobs:
           echo ""
           echo "✅ 固件构建成功：$(basename $SYSUPGRADE)"
 
-      - name: 📤 Upload firmware artifact
-        uses: actions/upload-artifact@v4.6.2
-        with:
-          name: openwrt-360T7-${{ env.OPENWRT_VERSION }}-${{ github.run_number }}
-          path: |
-            imagebuilder/bin/targets/mediatek/filogic/*sysupgrade*
-            imagebuilder/bin/targets/mediatek/filogic/sha256sums
-          retention-days: 30
-          if-no-files-found: error
-
       - name: 🏷️ Generate release tag
         id: tag
         run: |
@@ -208,10 +196,11 @@ jobs:
         id: notes
         run: |
           cd imagebuilder
-          SYSUPGRADE=$(ls bin/targets/mediatek/filogic/*sysupgrade* 2>/dev/null | head -1)
-          FILENAME=$(basename "${SYSUPGRADE}")
-          SHA256=$(grep "${FILENAME}" bin/targets/mediatek/filogic/sha256sums | awk '{print $1}')
-          FILESIZE=$(ls -lh "${SYSUPGRADE}" | awk '{print $5}')
+          OUTDIR="bin/targets/mediatek/filogic"
+          FIRMWARE="${OUTDIR}/openwrt-${OPENWRT_VERSION}-mediatek-filogic-qihoo_360t7-squashfs-sysupgrade.itb"
+          FILENAME=$(basename "${FIRMWARE}")
+          SHA256=$(grep "${FILENAME}" "${OUTDIR}/sha256sums" | awk '{print $1}')
+          FILESIZE=$(ls -lh "${FIRMWARE}" | awk '{print $5}')
           BUILD_TIME=$(date -u '+%Y-%m-%d %H:%M UTC')
 
           cat > /tmp/release_notes.md << EOF
@@ -267,6 +256,6 @@ jobs:
           draft: false
           prerelease: false
           files: |
-            imagebuilder/bin/targets/mediatek/filogic/*sysupgrade*
+            imagebuilder/bin/targets/mediatek/filogic/openwrt-${{ env.OPENWRT_VERSION }}-mediatek-filogic-qihoo_360t7-squashfs-sysupgrade.itb
             imagebuilder/bin/targets/mediatek/filogic/sha256sums
           fail_on_unmatched_files: true
