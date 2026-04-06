@@ -63,126 +63,106 @@ jobs:
           else
             echo "✅ ImageBuilder 新鲜下载（版本 ${OPENWRT_VERSION}）"
           fi
-          ls -lh imagebuilder/
 
       - name: 🔌 Setup nikki feed from GitHub Releases tar.gz
         run: |
           set -euo pipefail
 
-          # ---------------------------------------------------------------
-          # 直接从 nikki 官方 GitHub Releases 下载 tar.gz
-          # tar.gz 内含全部 APK 文件 + 正确格式的 APKINDEX
-          # 完全绕开 CDN（nikkinikki.pages.dev），避免 HTML/格式问题
-          # ---------------------------------------------------------------
           OPENWRT_MAJOR="${OPENWRT_VERSION%.*}"
           NIKKI_TAR="nikki_${ARCH}-openwrt-${OPENWRT_MAJOR}.tar.gz"
           NIKKI_URL="https://github.com/nikkinikki-org/OpenWrt-nikki/releases/latest/download/${NIKKI_TAR}"
 
-          echo ">>> 下载 nikki release tar.gz..."
+          # ---------------------------------------------------------------
+          # 第一步：先安装 nikki 公钥，后续所有操作都需要它
+          # ---------------------------------------------------------------
+          echo ">>> [1/4] 安装 nikki 签名公钥..."
+          APK_KEYS_DIR=$(find imagebuilder -path "*/apk/keys" -type d 2>/dev/null | head -1)
+          if [ -n "${APK_KEYS_DIR}" ]; then
+            wget -q "https://nikkinikki.pages.dev/public-key.pem" \
+                 -O "${APK_KEYS_DIR}/nikki.pem"
+            echo ">>> 公钥已安装：${APK_KEYS_DIR}/nikki.pem ✅"
+            ls -lh "${APK_KEYS_DIR}/"
+          else
+            echo "❌ 未找到 apk keys 目录"
+            find imagebuilder -name "keys" -type d | head -10
+            exit 1
+          fi
+
+          # ---------------------------------------------------------------
+          # 第二步：下载并解压 nikki 官方 Release tar.gz
+          # tar.gz 内已含 packages.adb（即 APKINDEX）和全部 APK 文件
+          # ---------------------------------------------------------------
+          echo ">>> [2/4] 下载 nikki release tar.gz..."
           echo "    URL: ${NIKKI_URL}"
           wget --progress=bar:force "${NIKKI_URL}" -O nikki-release.tar.gz
 
-          echo ">>> 验证 tar.gz 格式..."
-          if ! tar -tzf nikki-release.tar.gz > /dev/null 2>&1; then
-            echo "❌ 下载的文件不是合法 tar.gz，打印文件类型："
-            file nikki-release.tar.gz
-            python3 -c "
-          import sys
-          with open('nikki-release.tar.gz','rb') as f:
-              print('magic hex:', f.read(8).hex())
-          "
+          echo ">>> [3/4] 解压..."
+          mkdir -p /tmp/nikki-feed
+          tar -xzf nikki-release.tar.gz -C /tmp/nikki-feed/
+
+          echo ">>> 解压后全部文件："
+          find /tmp/nikki-feed -type f | sort
+
+          # ---------------------------------------------------------------
+          # 第三步：定位 APK 目录
+          # tar.gz 内 packages.adb 和 *.apk 在同一目录，直接找即可
+          # ---------------------------------------------------------------
+          FEED_DIR=$(dirname "$(find /tmp/nikki-feed -name "packages.adb" | head -1)")
+          if [ -z "${FEED_DIR}" ] || [ "${FEED_DIR}" = "." ]; then
+            # 没有 packages.adb，试着找 APK 文件
+            FEED_DIR=$(dirname "$(find /tmp/nikki-feed -name "*.apk" | head -1)")
+          fi
+
+          if [ -z "${FEED_DIR}" ] || [ "${FEED_DIR}" = "." ]; then
+            echo "❌ 无法定位 feed 目录，解压内容："
+            find /tmp/nikki-feed -type f
             exit 1
           fi
-          echo ">>> tar.gz 格式验证通过 ✅"
 
-          echo ">>> tar.gz 内容结构："
-          tar -tzf nikki-release.tar.gz
-
-          echo ">>> 解压到 /tmp/nikki-release/..."
-          mkdir -p /tmp/nikki-release
-          tar -xzf nikki-release.tar.gz -C /tmp/nikki-release/
-
-          echo ">>> 解压后目录结构："
-          find /tmp/nikki-release -type f | sort
+          echo ">>> Feed 目录：${FEED_DIR}"
+          echo ">>> 目录内容："
+          ls -lh "${FEED_DIR}/"
 
           # ---------------------------------------------------------------
-          # 找到 APK 文件所在目录（即包含 *.apk 的目录）
-          # tar.gz 内部路径可能是：
-          #   ./aarch64_cortex-a53/nikki/*.apk  或  直接 *.apk
+          # 如果 tar.gz 内没有 packages.adb，则用 apk 工具生成
+          # 注意：公钥已在第一步安装，此时 apk 可以正常验签
           # ---------------------------------------------------------------
-          APK_DIR=$(dirname "$(find /tmp/nikki-release -name "nikki-*.apk" -o -name "nikki_*.apk" | head -1)")
-          if [ -z "${APK_DIR}" ] || [ "${APK_DIR}" = "." ]; then
-            echo "❌ 未找到 nikki APK 文件，解压内容："
-            find /tmp/nikki-release -type f
-            exit 1
-          fi
-          echo ">>> APK 所在目录：${APK_DIR}"
-          ls -lh "${APK_DIR}/"
-
-          # ---------------------------------------------------------------
-          # 检查 tar.gz 内是否已含有 APKINDEX（新格式为 APKINDEX.adb）
-          # 若有则直接用，若无则用 ImageBuilder 自带 apk 工具重新生成
-          # ---------------------------------------------------------------
-          APKINDEX_FILE=$(find "${APK_DIR}" -name "APKINDEX*" | head -1)
-          if [ -n "${APKINDEX_FILE}" ]; then
-            echo ">>> tar.gz 内已含 APKINDEX：${APKINDEX_FILE} ✅"
-          else
-            echo ">>> tar.gz 内无 APKINDEX，用 ImageBuilder apk 工具生成..."
+          if [ ! -f "${FEED_DIR}/packages.adb" ] && [ ! -f "${FEED_DIR}/APKINDEX.tar.gz" ]; then
+            echo ">>> 未找到 packages.adb，用 ImageBuilder apk 工具生成..."
             APK_BIN=$(find imagebuilder -name "apk" -type f -executable 2>/dev/null | head -1)
-            if [ -z "${APK_BIN}" ]; then
-              echo "❌ 未找到 ImageBuilder 的 apk 工具"
-              find imagebuilder/staging_dir -maxdepth 4 -name "apk" | head -20
-              exit 1
-            fi
-            echo ">>> 找到 apk 工具：${APK_BIN}，版本：$("${APK_BIN}" --version)"
-
-            cd "${APK_DIR}"
-            # 尝试 mkndx（apk-tools 2.x），失败则回退 index
+            echo ">>> apk 工具：${APK_BIN}，版本：$("${APK_BIN}" --version)"
+            cd "${FEED_DIR}"
             if "${OLDPWD}/${APK_BIN}" mkndx --help >/dev/null 2>&1; then
               "${OLDPWD}/${APK_BIN}" mkndx \
-                --output APKINDEX.adb \
+                --output packages.adb \
                 --description "nikki local mirror" \
                 *.apk
-              APKINDEX_FILE="${APK_DIR}/APKINDEX.adb"
             else
               "${OLDPWD}/${APK_BIN}" index \
                 --output APKINDEX.tar.gz \
                 --description "nikki local mirror" \
                 *.apk
-              APKINDEX_FILE="${APK_DIR}/APKINDEX.tar.gz"
             fi
             cd "${OLDPWD}"
-            echo ">>> 生成 APKINDEX：${APKINDEX_FILE} ✅"
-          fi
-
-          # ---------------------------------------------------------------
-          # 安装 nikki 公钥到 ImageBuilder
-          # ---------------------------------------------------------------
-          echo ">>> 下载 nikki 签名公钥..."
-          APK_KEYS_DIR=$(find imagebuilder -path "*/apk/keys" -type d 2>/dev/null | head -1)
-          if [ -n "${APK_KEYS_DIR}" ]; then
-            wget -q "https://nikkinikki.pages.dev/public-key.pem" \
-                 -O "${APK_KEYS_DIR}/nikki.pem" && \
-              echo ">>> 公钥已安装：${APK_KEYS_DIR}/nikki.pem ✅" || \
-              echo ">>> ⚠️ 公钥下载失败，构建时 apk 可能报签名错误"
+            echo ">>> APKINDEX 生成完成 ✅"
           else
-            echo ">>> 未找到 apk keys 目录，跳过公钥安装"
+            echo ">>> tar.gz 内已含 APKINDEX，直接使用 ✅"
           fi
 
           # ---------------------------------------------------------------
-          # 注册本地 feed
+          # 第四步：注册 feed 到 repositories
           # ---------------------------------------------------------------
-          echo ">>> 注册本地 nikki feed 到 repositories..."
+          echo ">>> [4/4] 注册 feed 到 repositories..."
           cd imagebuilder
           REPO_FILE=$(find . -maxdepth 2 -name "repositories*" -not -path "*/\.*" | head -1)
           echo ">>> 配置文件：${REPO_FILE}"
-          echo ">>> 追加前内容："
+          echo ">>> 追加前："
           cat "${REPO_FILE}"
 
-          echo "file://${APK_DIR}" >> "${REPO_FILE}"
+          echo "file://${FEED_DIR}" >> "${REPO_FILE}"
 
           echo ""
-          echo ">>> 追加后内容："
+          echo ">>> 追加后："
           cat "${REPO_FILE}"
           echo ">>> nikki feed 注册完成 ✅"
 
@@ -195,12 +175,8 @@ jobs:
           echo ">>> 下载 sing-box ${SINGBOX_VERSION} (linux-arm64)..."
           wget -q "${SINGBOX_URL}" -O "${SINGBOX_TAR}"
 
-          echo ">>> 解包 tar.gz..."
           mkdir -p singbox_extract
           tar -xzf "${SINGBOX_TAR}" -C singbox_extract
-
-          echo ">>> 包内容结构："
-          find singbox_extract -type f | sort
 
           SINGBOX_BIN=$(find singbox_extract -type f -name "sing-box" | head -1)
           if [ -z "${SINGBOX_BIN}" ]; then
@@ -208,12 +184,10 @@ jobs:
             exit 1
           fi
 
-          echo ">>> 注入到 files overlay → /usr/bin/sing-box"
           mkdir -p files/usr/bin
           cp "${SINGBOX_BIN}" files/usr/bin/sing-box
           chmod +x files/usr/bin/sing-box
 
-          echo ">>> 二进制信息："
           file files/usr/bin/sing-box
           echo ">>> sing-box 注入完成 ✅"
 
@@ -225,22 +199,17 @@ jobs:
 
           echo ">>> 下载 mihomo ${MIHOMO_VERSION} (linux/arm64)..."
           wget -q "${MIHOMO_URL}" -O mihomo.gz
-
-          echo ">>> 解压 gz..."
           gunzip -f mihomo.gz
 
-          echo ">>> 注入到 files overlay → /usr/bin/mihomo"
           mkdir -p files/usr/bin
           cp mihomo files/usr/bin/mihomo
           chmod +x files/usr/bin/mihomo
 
-          echo ">>> 二进制信息："
           file files/usr/bin/mihomo
           echo ">>> mihomo 注入完成 ✅"
 
       - name: 🔍 Verify profile exists
         run: |
-          echo ">>> 检查设备 Profile 是否存在..."
           cd imagebuilder
           make info | grep -A3 "${PROFILE}" || {
             echo "❌ Profile '${PROFILE}' 不存在"
@@ -253,9 +222,7 @@ jobs:
         run: |
           set -euo pipefail
           cd imagebuilder
-          echo ">>> 开始构建固件，Profile: ${PROFILE}"
-          echo ">>> 版本: ${OPENWRT_VERSION}"
-          echo ">>> 时间: $(date)"
+          echo ">>> 开始构建固件，Profile: ${PROFILE}，时间: $(date)"
           echo "---"
           make image \
             PROFILE="${PROFILE}" \
@@ -280,17 +247,14 @@ jobs:
 
       - name: ✅ Verify output
         run: |
-          echo ">>> 检查输出文件..."
           cd imagebuilder
           SYSUPGRADE=$(ls bin/targets/mediatek/filogic/*sysupgrade* 2>/dev/null)
           if [ -z "$SYSUPGRADE" ]; then
             echo "❌ 未找到 sysupgrade 固件"
             exit 1
           fi
-          echo ">>> 固件文件列表："
           ls -lh bin/targets/mediatek/filogic/
           echo ""
-          echo ">>> SHA256 校验值："
           cat bin/targets/mediatek/filogic/sha256sums
           echo ""
           echo "✅ 固件构建成功：$(basename $SYSUPGRADE)"
@@ -344,8 +308,8 @@ jobs:
 
           ### 二进制覆盖说明
 
-          > nikki APK 自带 mihomo，本固件通过 files overlay 将其替换为 \`${MIHOMO_VERSION}\`。
-          > sing-box APK（官方仓库）的 init 脚本保留，二进制通过官方 linux-arm64 tar.gz 替换为 \`${SINGBOX_VERSION}\`。
+          > nikki 自带 mihomo，本固件通过 files overlay 将其替换为 \`${MIHOMO_VERSION}\`。
+          > sing-box 的 init 脚本保留，二进制通过官方 linux-arm64 tar.gz 替换为 \`${SINGBOX_VERSION}\`。
 
           ### SHA256 校验
 
