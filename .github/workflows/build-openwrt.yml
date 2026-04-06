@@ -34,7 +34,7 @@ jobs:
           sudo apt-get install -y \
             build-essential libncurses-dev zlib1g-dev gawk \
             gettext libssl-dev xsltproc rsync wget unzip python3 \
-            qemu-utils apk-tools
+            qemu-utils
           echo ">>> 依赖安装完成"
 
       - name: 💾 Cache ImageBuilder
@@ -68,33 +68,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          OPENWRT_MAJOR="${OPENWRT_VERSION%.*}"
-          NIKKI_TAR="nikki_${ARCH}-openwrt-${OPENWRT_MAJOR}.tar.gz"
-          NIKKI_URL="https://github.com/nikkinikki-org/OpenWrt-nikki/releases/latest/download/${NIKKI_TAR}"
-
-          # 1. 下载并解压 nikki release tarball
-          echo ">>> [1/4] 下载 ${NIKKI_TAR}..."
-          wget --progress=bar:force "${NIKKI_URL}" -O nikki-release.tar.gz
-          mkdir -p /tmp/nikki-feed
-          tar -xzf nikki-release.tar.gz -C /tmp/nikki-feed/
-          echo ">>> 解压后文件："
-          find /tmp/nikki-feed -type f | sort
-
-          # 2. 用 Ubuntu 完整 apk-tools 生成合法 APKINDEX.tar.gz
-          echo ">>> [2/4] 生成 APKINDEX.tar.gz..."
-          NIKKI_REPO="/tmp/nikki-repo"
-          mkdir -p "${NIKKI_REPO}"
-          cp /tmp/nikki-feed/*.apk "${NIKKI_REPO}/"
-          apk index \
-            --no-sign \
-            -o "${NIKKI_REPO}/APKINDEX.tar.gz" \
-            "${NIKKI_REPO}"/*.apk
-          echo ">>> APKINDEX.tar.gz 生成完成 ✅"
-          echo ">>> feed 目录内容："
-          ls -lh "${NIKKI_REPO}/"
-
-          # 3. 安装 nikki 公钥到 ImageBuilder keys 目录
-          echo ">>> [3/4] 安装 nikki 签名公钥..."
+          # 1. 安装 nikki 签名公钥到 ImageBuilder keys 目录
+          echo ">>> [1/2] 安装 nikki 签名公钥..."
           APK_KEYS_DIR=$(find imagebuilder -path "*/apk/keys" -type d | head -1)
           if [ -z "${APK_KEYS_DIR}" ]; then
             APK_KEYS_DIR=$(find imagebuilder -name "keys" -type d | head -1)
@@ -107,8 +82,8 @@ jobs:
                -O "${APK_KEYS_DIR}/nikki.pem"
           echo ">>> 公钥已安装 ✅"
 
-          # 4. 注册 feed 到 ImageBuilder repositories 配置
-          echo ">>> [4/4] 注册 feed..."
+          # 2. 注册 nikki 在线 feed（直接用官方 HTTPS repo，无需本地处理索引）
+          echo ">>> [2/2] 注册 nikki 在线 feed..."
           REPO_CONF=$(find imagebuilder -maxdepth 2 \
                       -name "repositories.conf" | head -1)
           if [ -z "${REPO_CONF}" ]; then
@@ -119,7 +94,9 @@ jobs:
             echo "❌ 未找到 repositories 配置文件"; exit 1
           fi
           echo ">>> 配置文件：${REPO_CONF}"
-          echo "file://${NIKKI_REPO}" >> "${REPO_CONF}"
+          OPENWRT_MAJOR="${OPENWRT_VERSION%.*}"
+          echo "https://nikkinikki-org.github.io/OpenWrt-nikki/${OPENWRT_MAJOR}/${ARCH}" \
+            >> "${REPO_CONF}"
           echo ">>> 注册后 repositories 内容："
           cat "${REPO_CONF}"
           echo ">>> nikki feed 注册完成 ✅"
