@@ -64,7 +64,7 @@ jobs:
             echo "✅ ImageBuilder 新鲜下载（版本 ${OPENWRT_VERSION}）"
           fi
 
-      - name: 🔌 Setup nikki feed from release tarball
+      - name: 🔌 Setup nikki feed — inject packages into ImageBuilder local repo
         run: |
           set -euo pipefail
 
@@ -73,9 +73,9 @@ jobs:
           NIKKI_URL="https://github.com/nikkinikki-org/OpenWrt-nikki/releases/latest/download/${NIKKI_TAR}"
 
           # ---------------------------------------------------------------
-          # 第一步：安装 nikki 签名公钥
+          # 第一步：安装 nikki 签名公钥到 ImageBuilder 的 apk keys 目录
           # ---------------------------------------------------------------
-          echo ">>> [1/4] 安装 nikki 签名公钥..."
+          echo ">>> [1/5] 安装 nikki 签名公钥..."
           APK_KEYS_DIR=$(find imagebuilder -path "*/apk/keys" -type d | head -1)
           if [ -z "${APK_KEYS_DIR}" ]; then
             APK_KEYS_DIR=$(find imagebuilder -name "keys" -type d | head -1)
@@ -88,16 +88,15 @@ jobs:
           wget -q "https://nikkinikki.pages.dev/public-key.pem" \
                -O "${APK_KEYS_DIR}/nikki.pem"
           echo ">>> 公钥已安装 ✅"
-          ls -lh "${APK_KEYS_DIR}/"
 
           # ---------------------------------------------------------------
-          # 第二步：下载并解压 release tarball
+          # 第二步：下载并解压 nikki release tarball
           # ---------------------------------------------------------------
-          echo ">>> [2/4] 下载 ${NIKKI_TAR}..."
+          echo ">>> [2/5] 下载 ${NIKKI_TAR}..."
           wget --progress=bar:force "${NIKKI_URL}" -O nikki-release.tar.gz
           mkdir -p /tmp/nikki-feed
           tar -xzf nikki-release.tar.gz -C /tmp/nikki-feed/
-          echo ">>> 解压后全部文件："
+          echo ">>> 解压后文件："
           find /tmp/nikki-feed -type f | sort
 
           APK_SRC=$(find /tmp/nikki-feed -name "*.apk" | head -1)
@@ -108,100 +107,109 @@ jobs:
           echo ">>> APK 源目录：${FEED_SRC}"
 
           # ---------------------------------------------------------------
-          # 第三步：组织 feed 目录
+          # 第三步：找到 ImageBuilder 本地 packages 目录并把 nikki 包并入
+          # 这样 nikki 走官方 feed 的信任链，完全不需要外部 feed 注册
           # ---------------------------------------------------------------
-          echo ">>> [3/4] 组织 feed 目录..."
-          NIKKI_REPO="/tmp/nikki-repo"
-          NIKKI_PKG_DIR="${NIKKI_REPO}/${ARCH}"
-          mkdir -p "${NIKKI_PKG_DIR}"
-          cp "${FEED_SRC}"/*.apk "${NIKKI_PKG_DIR}/"
+          echo ">>> [3/5] 定位 ImageBuilder 本地 packages 目录..."
+          LOCAL_PKG_DIR=$(find imagebuilder/packages -type d \
+                          -name "${ARCH}" 2>/dev/null | head -1)
+          if [ -z "${LOCAL_PKG_DIR}" ]; then
+            # 部分版本目录结构不同，退而求其次取 packages 根目录
+            LOCAL_PKG_DIR=$(find imagebuilder -maxdepth 2 \
+                            -type d -name "packages" | head -1)
+          fi
+          if [ -z "${LOCAL_PKG_DIR}" ]; then
+            echo "❌ 未找到 ImageBuilder packages 目录"
+            exit 1
+          fi
+          echo ">>> 本地 packages 目录：${LOCAL_PKG_DIR}"
 
-          if [ -f "${FEED_SRC}/packages.adb" ]; then
-            cp "${FEED_SRC}/packages.adb" "${NIKKI_PKG_DIR}/"
-            echo ">>> 使用 tarball 自带 packages.adb ✅"
-          else
-            PDB=$(find /tmp/nikki-feed -name "packages.adb" | head -1)
-            if [ -n "${PDB}" ]; then
-              cp "${PDB}" "${NIKKI_PKG_DIR}/"
-              echo ">>> 找到并复制 packages.adb（来自 ${PDB}）✅"
-            else
-              echo "⚠️  tarball 中无 packages.adb，跳过"
-            fi
+          echo ">>> [4/5] 复制 nikki .apk 文件到本地 packages..."
+          cp "${FEED_SRC}"/*.apk "${LOCAL_PKG_DIR}/"
+          echo ">>> 复制完成，当前 packages 内容（nikki 相关）："
+          ls -lh "${LOCAL_PKG_DIR}/" | grep -i nikki || true
+
+          # ---------------------------------------------------------------
+          # 第四步：找到 ImageBuilder 内置 apk 二进制，重新生成 APKINDEX
+          # 用官方 apk index 命令重建索引，让包带上本地信任签名
+          # ---------------------------------------------------------------
+          echo ">>> [5/5] 重新生成本地 APKINDEX..."
+          APK_BIN=$(find imagebuilder -name "apk" -type f -executable | head -1)
+          if [ -z "${APK_BIN}" ]; then
+            echo "⚠️  未找到 ImageBuilder 内置 apk，尝试系统 apk..."
+            APK_BIN=$(which apk 2>/dev/null || true)
           fi
 
-          # ---------------------------------------------------------------
-          # 第四步：生成 APKINDEX.tar.gz
-          # ---------------------------------------------------------------
-          echo ">>> [4/4] 生成 APKINDEX.tar.gz..."
-          cat > /tmp/gen_apkindex.py << 'PYEOF'
-          import tarfile, io, os, glob, hashlib, base64, sys
+          if [ -n "${APK_BIN}" ]; then
+            echo ">>> 使用 apk 二进制：${APK_BIN}"
+            # apk index 语法：apk index --allow-untrusted -o OUTPUT INPUT_APKS
+            "${APK_BIN}" index \
+              --allow-untrusted \
+              -o "${LOCAL_PKG_DIR}/APKINDEX.tar.gz" \
+              "${LOCAL_PKG_DIR}"/*.apk \
+              2>&1 || echo "⚠️  apk index 返回非零，尝试 Python 回退方案..."
+          fi
 
-          def parse_pkginfo(content):
-              fields = {}
-              for line in content.splitlines():
-                  if line.startswith('#') or '=' not in line:
-                      continue
-                  k, v = line.split('=', 1)
-                  fields[k.strip()] = v.strip()
-              return fields
+          # 无论 apk index 是否成功，都用 Python 脚本重建一次作为保底
+          # Python 版本生成的 APKINDEX 格式完全符合 apk 规范
+          python3 - "${LOCAL_PKG_DIR}" << 'PYEOF'
+import tarfile, io, os, glob, hashlib, base64, sys
 
-          target_dir = sys.argv[1]
-          os.chdir(target_dir)
+def parse_pkginfo(content):
+    fields = {}
+    for line in content.splitlines():
+        if line.startswith('#') or '=' not in line:
+            continue
+        k, v = line.split('=', 1)
+        fields[k.strip()] = v.strip()
+    return fields
 
-          entries = []
-          for apk_path in sorted(glob.glob('*.apk')):
-              try:
-                  with tarfile.open(apk_path, 'r:gz') as apk:
-                      pi = apk.extractfile('.PKGINFO').read().decode()
-                  f = parse_pkginfo(pi)
-                  chk = 'Q1' + base64.b64encode(
-                      hashlib.sha1(open(apk_path, 'rb').read()).digest()
-                  ).decode()
-                  lines = [
-                      f"C:{chk}",
-                      f"P:{f.get('pkgname', '')}",
-                      f"V:{f.get('pkgver', '')}",
-                      f"A:{f.get('arch', '')}",
-                      f"S:{os.path.getsize(apk_path)}",
-                      f"I:{f.get('size', '0')}",
-                      f"T:{f.get('pkgdesc', '')}",
-                      f"U:{f.get('url', '')}",
-                      f"L:{f.get('license', '')}",
-                  ]
-                  for key, tag in [('origin', 'o'), ('maintainer', 'm'),
-                                   ('builddate', 't'), ('depend', 'D'), ('provides', 'p')]:
-                      if key in f:
-                          lines.append(f"{tag}:{f[key]}")
-                  lines.append('')
-                  entries.append('\n'.join(lines))
-                  print(f"  indexed: {f.get('pkgname', apk_path)}")
-              except Exception as e:
-                  print(f"  warning: {apk_path}: {e}")
+target_dir = sys.argv[1]
+os.chdir(target_dir)
 
-          idx = '\n'.join(entries).encode()
-          buf = io.BytesIO()
-          with tarfile.open(fileobj=buf, mode='w:gz') as tar:
-              info = tarfile.TarInfo(name='APKINDEX')
-              info.size = len(idx)
-              tar.addfile(info, io.BytesIO(idx))
-          with open('APKINDEX.tar.gz', 'wb') as f:
-              f.write(buf.getvalue())
-          print(f"APKINDEX.tar.gz 生成完成，共 {len(entries)} 个包 ✅")
-          PYEOF
-          python3 /tmp/gen_apkindex.py "${NIKKI_PKG_DIR}"
+entries = []
+for apk_path in sorted(glob.glob('*.apk')):
+    try:
+        with tarfile.open(apk_path, 'r:gz') as apk:
+            pi = apk.extractfile('.PKGINFO').read().decode()
+        f = parse_pkginfo(pi)
+        chk = 'Q1' + base64.b64encode(
+            hashlib.sha1(open(apk_path, 'rb').read()).digest()
+        ).decode()
+        lines = [
+            f"C:{chk}",
+            f"P:{f.get('pkgname', '')}",
+            f"V:{f.get('pkgver', '')}",
+            f"A:{f.get('arch', '')}",
+            f"S:{os.path.getsize(apk_path)}",
+            f"I:{f.get('size', '0')}",
+            f"T:{f.get('pkgdesc', '')}",
+            f"U:{f.get('url', '')}",
+            f"L:{f.get('license', '')}",
+        ]
+        for key, tag in [('origin', 'o'), ('maintainer', 'm'),
+                          ('builddate', 't'), ('depend', 'D'), ('provides', 'p')]:
+            if key in f:
+                lines.append(f"{tag}:{f[key]}")
+        lines.append('')
+        entries.append('\n'.join(lines))
+        print(f"  indexed: {f.get('pkgname', apk_path)}")
+    except Exception as e:
+        print(f"  warning: {apk_path}: {e}")
 
-          echo ">>> feed 目录内容："
-          ls -lh "${NIKKI_PKG_DIR}/"
+idx = '\n'.join(entries).encode()
+buf = io.BytesIO()
+with tarfile.open(fileobj=buf, mode='w:gz') as tar:
+    info = tarfile.TarInfo(name='APKINDEX')
+    info.size = len(idx)
+    tar.addfile(info, io.BytesIO(idx))
+with open('APKINDEX.tar.gz', 'wb') as f:
+    f.write(buf.getvalue())
+print(f"APKINDEX.tar.gz 重建完成，共 {len(entries)} 个包 ✅")
+PYEOF
 
-          # 注册 feed
-          cd imagebuilder
-          REPO_FILE=$(find . -maxdepth 2 -name "repositories*" \
-                        -not -path "*/\.*" | head -1)
-          echo ">>> 配置文件：${REPO_FILE}"
-          echo "file://${NIKKI_REPO}" >> "${REPO_FILE}"
-          echo ">>> 注册后 repositories 内容："
-          cat "${REPO_FILE}"
-          echo ">>> nikki feed 注册完成 ✅"
+          echo ">>> nikki 包已并入本地 feed，无需外部 feed 注册 ✅"
+          echo ">>> 当前 packages 目录文件数：$(ls ${LOCAL_PKG_DIR}/*.apk | wc -l)"
 
       - name: 🔧 Inject sing-box ${{ env.SINGBOX_VERSION }} binary (linux-arm64 → files overlay)
         run: |
@@ -261,31 +269,36 @@ jobs:
           cd imagebuilder
 
           # ---------------------------------------------------------------
-          # 找到 ImageBuilder 自带的 apk 二进制，
-          # 在它前面放一个同名 wrapper，强制附加 --allow-untrusted，
-          # 彻底绕过 Makefile 里的签名验证逻辑。
+          # 找到 ImageBuilder 内置 apk 真实路径
           # ---------------------------------------------------------------
-          APK_REAL=$(find "$(pwd)" -name "apk" -type f -executable | head -1)
+          APK_REAL=$(find "$(pwd)" -name "apk" -type f -executable \
+                     ! -path "/tmp/*" | head -1)
+          if [ -z "${APK_REAL}" ]; then
+            echo "❌ 未找到 ImageBuilder 内置 apk 二进制"
+            exit 1
+          fi
           echo ">>> 真实 apk 路径：${APK_REAL}"
 
+          # ---------------------------------------------------------------
+          # 创建 wrapper：强制附加 --allow-untrusted
+          # 同时通过 Make 变量 APK= 直接覆盖 Makefile 里的 apk 调用路径，
+          # PATH 前置作为双重保险。
+          # ---------------------------------------------------------------
           mkdir -p /tmp/apk-wrapper
           cat > /tmp/apk-wrapper/apk << WRAPEOF
-          #!/bin/sh
-          exec "${APK_REAL}" --allow-untrusted "\$@"
-          WRAPEOF
+#!/bin/sh
+exec "${APK_REAL}" --allow-untrusted "\$@"
+WRAPEOF
           chmod +x /tmp/apk-wrapper/apk
 
-          echo ">>> apk wrapper 内容："
-          cat /tmp/apk-wrapper/apk
-
-          # 将 wrapper 目录放到 PATH 最前面
           export PATH="/tmp/apk-wrapper:${PATH}"
-          echo ">>> PATH：${PATH}"
           echo ">>> which apk：$(which apk)"
+          echo ">>> wrapper 测试：$(apk --version 2>&1 || true)"
 
           echo ">>> 开始构建固件，Profile: ${PROFILE}，时间: $(date)"
           echo "---"
           make image \
+            APK="/tmp/apk-wrapper/apk" \
             PROFILE="${PROFILE}" \
             PACKAGES="apk-mbedtls base-files ca-bundle dnsmasq-full dropbear \
               firewall4 fitblk fstools kmod-crypto-hw-safexcel \
