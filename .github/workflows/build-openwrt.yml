@@ -48,7 +48,7 @@ jobs:
           mv "${BUILDER}" imagebuilder
           echo ">>> ImageBuilder 准备完成"
 
-      - name: 🔌 Add nikki feed to repositories.conf
+      - name: 🔌 Add nikki feed to repositories
         run: |
           set -euo pipefail
           cd imagebuilder
@@ -56,17 +56,25 @@ jobs:
           OPENWRT_MAJOR="${OPENWRT_VERSION%.*}"
           NIKKI_FEED="https://nikkinikki.pages.dev/openwrt-${OPENWRT_MAJOR}/${ARCH}/nikki"
 
-          echo ">>> 当前 repositories.conf 内容："
-          cat repositories.conf
+          echo ">>> 查找 repositories 配置文件..."
+          REPO_FILE=$(find . -maxdepth 2 -name "repositories*" -not -path "*/\.*" | head -1)
+          if [ -z "${REPO_FILE}" ]; then
+            echo "❌ 未找到 repositories 配置文件，列出目录结构："
+            ls -la
+            exit 1
+          fi
+          echo ">>> 找到配置文件：${REPO_FILE}"
+
+          echo ">>> 当前内容："
+          cat "${REPO_FILE}"
 
           echo ""
           echo ">>> 添加 nikki feed..."
-          # 追加到文件末尾，格式与 OpenWrt 官方 feed 保持一致
-          echo "src/gz nikki ${NIKKI_FEED}" >> repositories.conf
+          echo "src/gz nikki ${NIKKI_FEED}" >> "${REPO_FILE}"
 
           echo ""
-          echo ">>> 更新后 repositories.conf 内容："
-          cat repositories.conf
+          echo ">>> 更新后内容："
+          cat "${REPO_FILE}"
           echo ">>> nikki feed 添加完成 ✅"
 
       # ---------------------------------------------------------------
