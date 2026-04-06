@@ -87,15 +87,23 @@ jobs:
           echo ">>> 下载 sing-box ${SINGBOX_VERSION} (openwrt/aarch64_cortex-a53)..."
           wget -q "${SINGBOX_URL}" -O "${SINGBOX_APK}"
 
-          echo ">>> 从 APK 中提取二进制（APK 本质为 tar+gz）..."
+          echo ">>> 从 APK 中提取二进制（OpenWrt APK 为 zip 格式）..."
           mkdir -p singbox_extract
-          tar -xzf "${SINGBOX_APK}" -C singbox_extract
-          # APK 内路径为 usr/bin/sing-box
-          ls -lh singbox_extract/usr/bin/sing-box
+          unzip -q "${SINGBOX_APK}" -d singbox_extract
+
+          echo ">>> APK 内容结构："
+          find singbox_extract -type f | sort
+
+          SINGBOX_BIN=$(find singbox_extract -type f -name "sing-box" | head -1)
+          if [ -z "${SINGBOX_BIN}" ]; then
+            echo "❌ 未在 APK 中找到 sing-box 二进制"
+            exit 1
+          fi
+          echo ">>> 找到二进制：${SINGBOX_BIN}"
 
           echo ">>> 注入到 files overlay → /usr/bin/sing-box"
           mkdir -p files/usr/bin
-          cp singbox_extract/usr/bin/sing-box files/usr/bin/sing-box
+          cp "${SINGBOX_BIN}" files/usr/bin/sing-box
           chmod +x files/usr/bin/sing-box
 
           echo ">>> 二进制信息："
