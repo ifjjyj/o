@@ -113,35 +113,28 @@ jobs:
             echo "❌ tarball 内未找到任何 .apk 文件"
             exit 1
           fi
-          FEED_DIR=$(dirname "${APK_SRC}")
-          echo ">>> APK 源目录：${FEED_DIR}"
-          ls -lh "${FEED_DIR}/"
+          FEED_SRC=$(dirname "${APK_SRC}")
+          echo ">>> APK 源目录：${FEED_SRC}"
+          ls -lh "${FEED_SRC}/"
 
           # ---------------------------------------------------------------
-          # 第三步：将 nikki APK 复制进 ImageBuilder 内部包目录并重建索引
-          # 不使用外部 file:// feed，直接合并到 ImageBuilder 自身仓库
-          # 这样 make image 时可直接找到 nikki 包，无需额外 feed 注册
+          # 第三步：按 APK 期望的目录结构组织 feed 并注册
+          # APK 查找 feed 时会自动追加 $ARCH/ 子目录，结构必须为：
+          #   /tmp/nikki-repo/$ARCH/packages.adb
+          #   /tmp/nikki-repo/$ARCH/*.apk
           # ---------------------------------------------------------------
-          echo ">>> [3/3] 合并 nikki APK 到 ImageBuilder 包目录..."
+          echo ">>> [3/3] 组织 feed 目录结构并注册..."
 
-          # 找到 ImageBuilder 内部已有 packages.adb 的目录（即 base 包仓库）
-          IB_PKG_DIR=$(find imagebuilder/packages -name "packages.adb" -type f \
-                         2>/dev/null | head -1 | xargs -r dirname)
-          if [ -z "${IB_PKG_DIR}" ]; then
-            # 不存在则按架构新建
-            IB_PKG_DIR="imagebuilder/packages/${ARCH}/base"
-            mkdir -p "${IB_PKG_DIR}"
-            echo ">>> 新建包目录：${IB_PKG_DIR}"
-          else
-            echo ">>> 找到现有包目录：${IB_PKG_DIR}"
-          fi
+          NIKKI_REPO="/tmp/nikki-repo"
+          NIKKI_PKG_DIR="${NIKKI_REPO}/${ARCH}"
+          mkdir -p "${NIKKI_PKG_DIR}"
 
-          # 复制所有 nikki APK
-          cp "${FEED_DIR}"/*.apk "${IB_PKG_DIR}/"
-          echo ">>> 已复制以下 APK 至 ${IB_PKG_DIR}："
-          ls -lh "${IB_PKG_DIR}"/*.apk
+          # 复制所有 nikki APK 到 $ARCH 子目录
+          cp "${FEED_SRC}"/*.apk "${NIKKI_PKG_DIR}/"
+          echo ">>> 已复制以下 APK 至 ${NIKKI_PKG_DIR}："
+          ls -lh "${NIKKI_PKG_DIR}/"
 
-          # 用 ImageBuilder 自带 apk 工具重建索引
+          # 生成索引（--allow-untrusted 仅用于建索引，不影响安装时验签）
           APK_BIN=$(find imagebuilder -name "apk" -type f -executable | head -1)
           if [ -z "${APK_BIN}" ]; then
             echo "❌ 未找到 apk 工具"
@@ -149,17 +142,25 @@ jobs:
           fi
           echo ">>> apk 工具：${APK_BIN}，版本：$("${APK_BIN}" --version)"
 
-          cd "${IB_PKG_DIR}"
+          cd "${NIKKI_PKG_DIR}"
           "${OLDPWD}/${APK_BIN}" mkndx \
             --allow-untrusted \
             --output packages.adb \
-            --description "base+nikki" \
+            --description "nikki feed" \
             *.apk
           cd "${OLDPWD}"
+          echo ">>> packages.adb 生成完成 ✅"
+          ls -lh "${NIKKI_PKG_DIR}/"
 
-          echo ">>> 索引重建完成，当前包目录内容："
-          ls -lh "${IB_PKG_DIR}/"
-          echo ">>> nikki APK 合并完成 ✅"
+          # 注册 feed：URL 只到 /tmp/nikki-repo，APK 自动追加 /$ARCH/
+          cd imagebuilder
+          REPO_FILE=$(find . -maxdepth 2 -name "repositories*" \
+                        -not -path "*/\.*" | head -1)
+          echo ">>> 配置文件：${REPO_FILE}"
+          echo "file://${NIKKI_REPO}" >> "${REPO_FILE}"
+          echo ">>> 注册后 repositories 内容："
+          cat "${REPO_FILE}"
+          echo ">>> nikki feed 注册完成 ✅"
 
       - name: 🔧 Inject sing-box ${{ env.SINGBOX_VERSION }} binary (linux-arm64 → files overlay)
         run: |
