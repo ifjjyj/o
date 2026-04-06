@@ -37,10 +37,6 @@ jobs:
             qemu-utils
           echo ">>> 依赖安装完成"
 
-      # ---------------------------------------------------------------
-      # 用 actions/cache 缓存 ImageBuilder
-      # key 绑定 OPENWRT_VERSION，版本不变直接命中，无需重新下载
-      # ---------------------------------------------------------------
       - name: 💾 Cache ImageBuilder
         id: cache-imagebuilder
         uses: actions/cache@v4
@@ -58,137 +54,137 @@ jobs:
           echo ">>> 解压中..."
           tar --zstd -xf "${BUILDER}.tar.zst"
           mv "${BUILDER}" imagebuilder
-          echo ">>> ImageBuilder 准备完成，将被缓存供后续构建使用"
+          echo ">>> ImageBuilder 准备完成"
 
       - name: ✔️ Confirm ImageBuilder ready
         run: |
-          echo ">>> ImageBuilder 状态："
           if [ "${{ steps.cache-imagebuilder.outputs.cache-hit }}" = "true" ]; then
-            echo "    ✅ 来自缓存（版本 ${OPENWRT_VERSION}）"
+            echo "✅ ImageBuilder 来自缓存（版本 ${OPENWRT_VERSION}）"
           else
-            echo "    ✅ 新鲜下载（版本 ${OPENWRT_VERSION}）"
+            echo "✅ ImageBuilder 新鲜下载（版本 ${OPENWRT_VERSION}）"
           fi
           ls -lh imagebuilder/
 
-      - name: 🔌 Build local nikki mirror & register as file:// feed
+      - name: 🔌 Setup nikki feed from GitHub Releases tar.gz
         run: |
           set -euo pipefail
 
+          # ---------------------------------------------------------------
+          # 直接从 nikki 官方 GitHub Releases 下载 tar.gz
+          # tar.gz 内含全部 APK 文件 + 正确格式的 APKINDEX
+          # 完全绕开 CDN（nikkinikki.pages.dev），避免 HTML/格式问题
+          # ---------------------------------------------------------------
           OPENWRT_MAJOR="${OPENWRT_VERSION%.*}"
-          NIKKI_BASE="https://nikkinikki.pages.dev/openwrt-${OPENWRT_MAJOR}/${ARCH}/nikki"
-          NIKKI_GH="https://github.com/nikkinikki-org/OpenWrt-nikki/releases/download"
+          NIKKI_TAR="nikki_${ARCH}-openwrt-${OPENWRT_MAJOR}.tar.gz"
+          NIKKI_URL="https://github.com/nikkinikki-org/OpenWrt-nikki/releases/latest/download/${NIKKI_TAR}"
 
-          MIRROR_DIR="/tmp/nikki-mirror/${ARCH}"
-          mkdir -p "${MIRROR_DIR}"
+          echo ">>> 下载 nikki release tar.gz..."
+          echo "    URL: ${NIKKI_URL}"
+          wget --progress=bar:force "${NIKKI_URL}" -O nikki-release.tar.gz
 
-          NIKKI_TAG="2026.03.10-r3"
-          LUCI_NIKKI_TAG="1.25.3-r1"
-          I18N_TAG="26.088.44343"
-
-          download_apk() {
-            local gh_url="$1"
-            local cdn_url="$2"
-            local dest="$3"
-            wget -q "${gh_url}" -O "${dest}" 2>/dev/null && return 0
-            echo "  ⚠️  GitHub 失败，尝试 CDN..."
-            wget -q "${cdn_url}" -O "${dest}"
-          }
-
-          echo ">>> 下载 nikki APK 包..."
-          download_apk \
-            "${NIKKI_GH}/${NIKKI_TAG}/nikki_${NIKKI_TAG}_${ARCH}.apk" \
-            "${NIKKI_BASE}/nikki-${NIKKI_TAG}.apk" \
-            "${MIRROR_DIR}/nikki-${NIKKI_TAG}.apk"
-
-          download_apk \
-            "${NIKKI_GH}/${LUCI_NIKKI_TAG}/luci-app-nikki_${LUCI_NIKKI_TAG}_all.apk" \
-            "${NIKKI_BASE}/luci-app-nikki-${LUCI_NIKKI_TAG}.apk" \
-            "${MIRROR_DIR}/luci-app-nikki-${LUCI_NIKKI_TAG}.apk"
-
-          download_apk \
-            "${NIKKI_GH}/${LUCI_NIKKI_TAG}/luci-i18n-nikki-zh-cn_${I18N_TAG}~a20a48b_all.apk" \
-            "${NIKKI_BASE}/luci-i18n-nikki-zh-cn-${I18N_TAG}~a20a48b.apk" \
-            "${MIRROR_DIR}/luci-i18n-nikki-zh-cn-${I18N_TAG}.apk"
-
-          echo ">>> 已下载的 APK 文件："
-          ls -lh "${MIRROR_DIR}/"
-
-          echo ">>> 验证 APK 文件格式（magic bytes = PK）..."
-          python3 - "${MIRROR_DIR}"/*.apk << 'PYEOF'
-          import sys, os
-          failed = False
-          for path in sys.argv[1:]:
-              with open(path, 'rb') as f:
-                  magic = f.read(4).hex()
-              fname = os.path.basename(path)
-              if magic.startswith('504b'):
-                  print(f"  ✅ {fname}  ({magic})")
-              else:
-                  print(f"  ❌ {fname} 不是合法 APK，magic={magic}")
-                  failed = True
-          if failed:
-              sys.exit(1)
-          PYEOF
-          echo ">>> APK 格式验证通过 ✅"
-
-          echo ">>> 查找 ImageBuilder 自带的 apk 工具..."
-          APK_BIN=$(find imagebuilder -name "apk" -type f -executable 2>/dev/null | head -1)
-          if [ -z "${APK_BIN}" ]; then
-            echo "❌ 未找到 apk 工具"
-            find imagebuilder/staging_dir -maxdepth 4 -type f | sort | head -50
+          echo ">>> 验证 tar.gz 格式..."
+          if ! tar -tzf nikki-release.tar.gz > /dev/null 2>&1; then
+            echo "❌ 下载的文件不是合法 tar.gz，打印文件类型："
+            file nikki-release.tar.gz
+            python3 -c "
+          import sys
+          with open('nikki-release.tar.gz','rb') as f:
+              print('magic hex:', f.read(8).hex())
+          "
             exit 1
           fi
-          echo ">>> 找到 apk 工具：${APK_BIN}"
-          "${APK_BIN}" --version
+          echo ">>> tar.gz 格式验证通过 ✅"
 
-          echo ">>> 本地生成 APKINDEX.tar.gz..."
-          cd "${MIRROR_DIR}"
-          if "${OLDPWD}/${APK_BIN}" mkndx --help >/dev/null 2>&1; then
-            "${OLDPWD}/${APK_BIN}" mkndx \
-              --output APKINDEX.tar.gz \
-              --description "nikki local mirror" \
-              *.apk
+          echo ">>> tar.gz 内容结构："
+          tar -tzf nikki-release.tar.gz
+
+          echo ">>> 解压到 /tmp/nikki-release/..."
+          mkdir -p /tmp/nikki-release
+          tar -xzf nikki-release.tar.gz -C /tmp/nikki-release/
+
+          echo ">>> 解压后目录结构："
+          find /tmp/nikki-release -type f | sort
+
+          # ---------------------------------------------------------------
+          # 找到 APK 文件所在目录（即包含 *.apk 的目录）
+          # tar.gz 内部路径可能是：
+          #   ./aarch64_cortex-a53/nikki/*.apk  或  直接 *.apk
+          # ---------------------------------------------------------------
+          APK_DIR=$(dirname "$(find /tmp/nikki-release -name "nikki-*.apk" -o -name "nikki_*.apk" | head -1)")
+          if [ -z "${APK_DIR}" ] || [ "${APK_DIR}" = "." ]; then
+            echo "❌ 未找到 nikki APK 文件，解压内容："
+            find /tmp/nikki-release -type f
+            exit 1
+          fi
+          echo ">>> APK 所在目录：${APK_DIR}"
+          ls -lh "${APK_DIR}/"
+
+          # ---------------------------------------------------------------
+          # 检查 tar.gz 内是否已含有 APKINDEX（新格式为 APKINDEX.adb）
+          # 若有则直接用，若无则用 ImageBuilder 自带 apk 工具重新生成
+          # ---------------------------------------------------------------
+          APKINDEX_FILE=$(find "${APK_DIR}" -name "APKINDEX*" | head -1)
+          if [ -n "${APKINDEX_FILE}" ]; then
+            echo ">>> tar.gz 内已含 APKINDEX：${APKINDEX_FILE} ✅"
           else
-            echo ">>> mkndx 不可用，回退到 apk index..."
-            "${OLDPWD}/${APK_BIN}" index \
-              --output APKINDEX.tar.gz \
-              --description "nikki local mirror" \
-              *.apk
-          fi
-          cd "${OLDPWD}"
+            echo ">>> tar.gz 内无 APKINDEX，用 ImageBuilder apk 工具生成..."
+            APK_BIN=$(find imagebuilder -name "apk" -type f -executable 2>/dev/null | head -1)
+            if [ -z "${APK_BIN}" ]; then
+              echo "❌ 未找到 ImageBuilder 的 apk 工具"
+              find imagebuilder/staging_dir -maxdepth 4 -name "apk" | head -20
+              exit 1
+            fi
+            echo ">>> 找到 apk 工具：${APK_BIN}，版本：$("${APK_BIN}" --version)"
 
-          echo ">>> 验证生成的 APKINDEX.tar.gz..."
-          if ! tar -tzf "${MIRROR_DIR}/APKINDEX.tar.gz" > /dev/null 2>&1; then
-            echo "❌ 生成的 APKINDEX.tar.gz 无效"
-            exit 1
+            cd "${APK_DIR}"
+            # 尝试 mkndx（apk-tools 2.x），失败则回退 index
+            if "${OLDPWD}/${APK_BIN}" mkndx --help >/dev/null 2>&1; then
+              "${OLDPWD}/${APK_BIN}" mkndx \
+                --output APKINDEX.adb \
+                --description "nikki local mirror" \
+                *.apk
+              APKINDEX_FILE="${APK_DIR}/APKINDEX.adb"
+            else
+              "${OLDPWD}/${APK_BIN}" index \
+                --output APKINDEX.tar.gz \
+                --description "nikki local mirror" \
+                *.apk
+              APKINDEX_FILE="${APK_DIR}/APKINDEX.tar.gz"
+            fi
+            cd "${OLDPWD}"
+            echo ">>> 生成 APKINDEX：${APKINDEX_FILE} ✅"
           fi
-          echo ">>> APKINDEX.tar.gz 内容："
-          tar -tzf "${MIRROR_DIR}/APKINDEX.tar.gz"
-          echo ">>> APKINDEX.tar.gz 生成成功 ✅"
 
+          # ---------------------------------------------------------------
+          # 安装 nikki 公钥到 ImageBuilder
+          # ---------------------------------------------------------------
           echo ">>> 下载 nikki 签名公钥..."
           APK_KEYS_DIR=$(find imagebuilder -path "*/apk/keys" -type d 2>/dev/null | head -1)
           if [ -n "${APK_KEYS_DIR}" ]; then
             wget -q "https://nikkinikki.pages.dev/public-key.pem" \
-                 -O "${APK_KEYS_DIR}/nikki.pem"
-            echo ">>> 公钥已安装：${APK_KEYS_DIR}/nikki.pem"
+                 -O "${APK_KEYS_DIR}/nikki.pem" && \
+              echo ">>> 公钥已安装：${APK_KEYS_DIR}/nikki.pem ✅" || \
+              echo ">>> ⚠️ 公钥下载失败，构建时 apk 可能报签名错误"
           else
             echo ">>> 未找到 apk keys 目录，跳过公钥安装"
           fi
 
-          echo ">>> 注册本地镜像到 repositories..."
+          # ---------------------------------------------------------------
+          # 注册本地 feed
+          # ---------------------------------------------------------------
+          echo ">>> 注册本地 nikki feed 到 repositories..."
           cd imagebuilder
           REPO_FILE=$(find . -maxdepth 2 -name "repositories*" -not -path "*/\.*" | head -1)
-          echo ">>> 使用配置文件：${REPO_FILE}"
+          echo ">>> 配置文件：${REPO_FILE}"
           echo ">>> 追加前内容："
           cat "${REPO_FILE}"
 
-          echo "file:///tmp/nikki-mirror/${ARCH}" >> "${REPO_FILE}"
+          echo "file://${APK_DIR}" >> "${REPO_FILE}"
 
           echo ""
           echo ">>> 追加后内容："
           cat "${REPO_FILE}"
-          echo ">>> nikki 本地镜像注册完成 ✅"
+          echo ">>> nikki feed 注册完成 ✅"
 
       - name: 🔧 Inject sing-box ${{ env.SINGBOX_VERSION }} binary (linux-arm64 → files overlay)
         run: |
@@ -341,15 +337,15 @@ jobs:
 
           ### 内置组件
 
-          - **nikki** (luci-app-nikki) \`2026.03.10-r3\`，mihomo 内核已升级至 \`v${MIHOMO_VERSION}\`
+          - **nikki** (luci-app-nikki)，mihomo 内核已升级至 \`v${MIHOMO_VERSION}\`
           - **sing-box** \`${SINGBOX_VERSION}\`（官方 linux-arm64，完全适配 360T7/aarch64_cortex-a53）
           - **LuCI** 中文界面
           - dnsmasq-full / nftables / kmod-tun / kmod-nft-tproxy 等透明代理依赖
 
           ### 二进制覆盖说明
 
-          > nikki APK 自带 mihomo \`1.19.21\`，本固件通过 files overlay 将其替换为 \`${MIHOMO_VERSION}\`。
-          > sing-box APK（官方仓库 \`1.12.17\`）的 init 脚本保留，二进制通过官方 linux-arm64 tar.gz 替换为 \`${SINGBOX_VERSION}\`。
+          > nikki APK 自带 mihomo，本固件通过 files overlay 将其替换为 \`${MIHOMO_VERSION}\`。
+          > sing-box APK（官方仓库）的 init 脚本保留，二进制通过官方 linux-arm64 tar.gz 替换为 \`${SINGBOX_VERSION}\`。
 
           ### SHA256 校验
 
