@@ -64,108 +64,154 @@ jobs:
             echo "✅ ImageBuilder 新鲜下载（版本 ${OPENWRT_VERSION}）"
           fi
 
-      - name: 🔌 Setup nikki feed from GitHub Releases tar.gz
-        run: |
-          set -euo pipefail
+      set -euo pipefail
 
-          OPENWRT_MAJOR="${OPENWRT_VERSION%.*}"
-          NIKKI_TAR="nikki_${ARCH}-openwrt-${OPENWRT_MAJOR}.tar.gz"
-          NIKKI_URL="https://github.com/nikkinikki-org/OpenWrt-nikki/releases/latest/download/${NIKKI_TAR}"
+echo "================================================"
+echo "🚀 Setup nikki feed (universal & future-proof)"
+echo "================================================"
 
-          # ---------------------------------------------------------------
-          # 第一步：先安装 nikki 公钥，后续所有操作都需要它
-          # ---------------------------------------------------------------
-          echo ">>> [1/4] 安装 nikki 签名公钥..."
-          APK_KEYS_DIR=$(find imagebuilder -path "*/apk/keys" -type d 2>/dev/null | head -1)
-          if [ -n "${APK_KEYS_DIR}" ]; then
-            wget -q "https://nikkinikki.pages.dev/public-key.pem" \
-                 -O "${APK_KEYS_DIR}/nikki.pem"
-            echo ">>> 公钥已安装：${APK_KEYS_DIR}/nikki.pem ✅"
-            ls -lh "${APK_KEYS_DIR}/"
-          else
-            echo "❌ 未找到 apk keys 目录"
-            find imagebuilder -name "keys" -type d | head -10
-            exit 1
-          fi
+OPENWRT_MAJOR="${OPENWRT_VERSION%.*}"
+NIKKI_TAR="nikki_${ARCH}-openwrt-${OPENWRT_MAJOR}.tar.gz"
+NIKKI_URL="https://github.com/nikkinikki-org/OpenWrt-nikki/releases/latest/download/${NIKKI_TAR}"
 
-          # ---------------------------------------------------------------
-          # 第二步：下载并解压 nikki 官方 Release tar.gz
-          # tar.gz 内已含 packages.adb（即 APKINDEX）和全部 APK 文件
-          # ---------------------------------------------------------------
-          echo ">>> [2/4] 下载 nikki release tar.gz..."
-          echo "    URL: ${NIKKI_URL}"
-          wget --progress=bar:force "${NIKKI_URL}" -O nikki-release.tar.gz
+WORKDIR="/tmp/nikki-feed"
+rm -rf "${WORKDIR}"
+mkdir -p "${WORKDIR}"
 
-          echo ">>> [3/4] 解压..."
-          mkdir -p /tmp/nikki-feed
-          tar -xzf nikki-release.tar.gz -C /tmp/nikki-feed/
+# --------------------------------------------------
+# [1/5] 安装 APK 公钥（标准路径，兼容所有版本）
+# --------------------------------------------------
+echo ">>> [1/5] 安装 apk 公钥..."
 
-          echo ">>> 解压后全部文件："
-          find /tmp/nikki-feed -type f | sort
+APK_KEYS_DIR="imagebuilder/etc/apk/keys"
+mkdir -p "${APK_KEYS_DIR}"
 
-          # ---------------------------------------------------------------
-          # 第三步：定位 APK 目录
-          # tar.gz 内 packages.adb 和 *.apk 在同一目录，直接找即可
-          # ---------------------------------------------------------------
-          FEED_DIR=$(dirname "$(find /tmp/nikki-feed -name "packages.adb" | head -1)")
-          if [ -z "${FEED_DIR}" ] || [ "${FEED_DIR}" = "." ]; then
-            # 没有 packages.adb，试着找 APK 文件
-            FEED_DIR=$(dirname "$(find /tmp/nikki-feed -name "*.apk" | head -1)")
-          fi
+wget -q "https://nikkinikki.pages.dev/public-key.pem" \
+     -O "${APK_KEYS_DIR}/nikki.pem"
 
-          if [ -z "${FEED_DIR}" ] || [ "${FEED_DIR}" = "." ]; then
-            echo "❌ 无法定位 feed 目录，解压内容："
-            find /tmp/nikki-feed -type f
-            exit 1
-          fi
+echo ">>> 公钥安装完成:"
+ls -lh "${APK_KEYS_DIR}"
 
-          echo ">>> Feed 目录：${FEED_DIR}"
-          echo ">>> 目录内容："
-          ls -lh "${FEED_DIR}/"
+# --------------------------------------------------
+# [2/5] 下载 nikki release
+# --------------------------------------------------
+echo ""
+echo ">>> [2/5] 下载 nikki release..."
+echo "URL: ${NIKKI_URL}"
 
-          # ---------------------------------------------------------------
-          # 如果 tar.gz 内没有 packages.adb，则用 apk 工具生成
-          # 注意：公钥已在第一步安装，此时 apk 可以正常验签
-          # ---------------------------------------------------------------
-          if [ ! -f "${FEED_DIR}/packages.adb" ] && [ ! -f "${FEED_DIR}/APKINDEX.tar.gz" ]; then
-            echo ">>> 未找到 packages.adb，用 ImageBuilder apk 工具生成..."
-            APK_BIN=$(find imagebuilder -name "apk" -type f -executable 2>/dev/null | head -1)
-            echo ">>> apk 工具：${APK_BIN}，版本：$("${APK_BIN}" --version)"
-            cd "${FEED_DIR}"
-            if "${OLDPWD}/${APK_BIN}" mkndx --help >/dev/null 2>&1; then
-              "${OLDPWD}/${APK_BIN}" mkndx \
-                --output packages.adb \
-                --description "nikki local mirror" \
-                *.apk
-            else
-              "${OLDPWD}/${APK_BIN}" index \
-                --output APKINDEX.tar.gz \
-                --description "nikki local mirror" \
-                *.apk
-            fi
-            cd "${OLDPWD}"
-            echo ">>> APKINDEX 生成完成 ✅"
-          else
-            echo ">>> tar.gz 内已含 APKINDEX，直接使用 ✅"
-          fi
+wget --progress=bar:force "${NIKKI_URL}" -O "${WORKDIR}/nikki.tar.gz"
 
-          # ---------------------------------------------------------------
-          # 第四步：注册 feed 到 repositories
-          # ---------------------------------------------------------------
-          echo ">>> [4/4] 注册 feed 到 repositories..."
-          cd imagebuilder
-          REPO_FILE=$(find . -maxdepth 2 -name "repositories*" -not -path "*/\.*" | head -1)
-          echo ">>> 配置文件：${REPO_FILE}"
-          echo ">>> 追加前："
-          cat "${REPO_FILE}"
+# --------------------------------------------------
+# [3/5] 解压并自动定位 feed
+# --------------------------------------------------
+echo ""
+echo ">>> [3/5] 解压..."
+tar -xzf "${WORKDIR}/nikki.tar.gz" -C "${WORKDIR}"
 
-          echo "file://${FEED_DIR}" >> "${REPO_FILE}"
+echo ">>> 扫描 feed 目录..."
 
-          echo ""
-          echo ">>> 追加后："
-          cat "${REPO_FILE}"
-          echo ">>> nikki feed 注册完成 ✅"
+# 优先找 packages.adb
+FEED_DIR="$(dirname "$(find "${WORKDIR}" -name 'packages.adb' | head -1 || true)")"
 
+# fallback: APKINDEX
+if [ -z "${FEED_DIR}" ] || [ "${FEED_DIR}" = "." ]; then
+  FEED_DIR="$(dirname "$(find "${WORKDIR}" -name 'APKINDEX.tar.gz' | head -1 || true)")"
+fi
+
+# fallback: 任意 apk
+if [ -z "${FEED_DIR}" ] || [ "${FEED_DIR}" = "." ]; then
+  FEED_DIR="$(dirname "$(find "${WORKDIR}" -name '*.apk' | head -1 || true)")"
+fi
+
+if [ -z "${FEED_DIR}" ] || [ "${FEED_DIR}" = "." ]; then
+  echo "❌ 无法定位 feed 目录"
+  echo ">>> 解压内容如下："
+  find "${WORKDIR}" -type f
+  exit 1
+fi
+
+echo ">>> Feed 目录: ${FEED_DIR}"
+ls -lh "${FEED_DIR}"
+
+# --------------------------------------------------
+# [4/5] 自动生成索引（如果缺失）
+# --------------------------------------------------
+echo ""
+echo ">>> [4/5] 检查 APK 索引..."
+
+if [ -f "${FEED_DIR}/packages.adb" ]; then
+  echo "✅ 已存在 packages.adb（新格式）"
+elif [ -f "${FEED_DIR}/APKINDEX.tar.gz" ]; then
+  echo "✅ 已存在 APKINDEX.tar.gz（旧格式）"
+else
+  echo "⚠️ 未发现索引，开始生成..."
+
+  APK_BIN="$(find imagebuilder -name apk -type f -executable | head -1 || true)"
+
+  if [ -z "${APK_BIN}" ]; then
+    echo "❌ 未找到 apk 工具（ImageBuilder 可能异常）"
+    exit 1
+  fi
+
+  echo ">>> 使用 apk: ${APK_BIN}"
+  "${APK_BIN}" --version || true
+
+  pushd "${FEED_DIR}" >/dev/null
+
+  if "${APK_BIN}" mkndx --help >/dev/null 2>&1; then
+    echo ">>> 使用 mkndx (新格式)..."
+    "${APK_BIN}" mkndx \
+      --output packages.adb \
+      --description "nikki local feed" \
+      *.apk
+  else
+    echo ">>> 使用 index (旧格式)..."
+    "${APK_BIN}" index \
+      --output APKINDEX.tar.gz \
+      --description "nikki local feed" \
+      *.apk
+  fi
+
+  popd >/dev/null
+
+  echo "✅ 索引生成完成"
+fi
+
+# --------------------------------------------------
+# [5/5] 注册 feed（自动兼容 repositories 文件）
+# --------------------------------------------------
+echo ""
+echo ">>> [5/5] 注册 feed..."
+
+cd imagebuilder
+
+REPO_FILE="$(find . -maxdepth 2 -name 'repositories*' -not -path '*/\.*' | head -1)"
+
+if [ -z "${REPO_FILE}" ]; then
+  echo "❌ 未找到 repositories 配置文件"
+  exit 1
+fi
+
+echo ">>> 使用配置文件: ${REPO_FILE}"
+
+echo ""
+echo ">>> 注册前："
+cat "${REPO_FILE}"
+
+# 避免重复写入
+if ! grep -q "${FEED_DIR}" "${REPO_FILE}"; then
+  echo "" >> "${REPO_FILE}"
+  echo "# nikki local feed" >> "${REPO_FILE}"
+  echo "src/gz nikki_local file://${FEED_DIR}" >> "${REPO_FILE}"
+fi
+
+echo ""
+echo ">>> 注册后："
+cat "${REPO_FILE}"
+
+echo ""
+echo "🎉 nikki feed 设置完成（稳定版）"
+echo "================================================"
       - name: 🔧 Inject sing-box ${{ env.SINGBOX_VERSION }} binary (linux-arm64 → files overlay)
         run: |
           set -euo pipefail
