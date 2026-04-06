@@ -68,6 +68,10 @@ jobs:
         run: |
           set -euo pipefail
 
+          NIKKI_BASE="https://nikkinikki.pages.dev"
+          OPENWRT_BRANCH="openwrt-${OPENWRT_VERSION%.*}"
+          NIKKI_FEED_URL="${NIKKI_BASE}/${OPENWRT_BRANCH}/${ARCH}/nikki/packages.adb"
+
           # 1. 安装 nikki 签名公钥到 ImageBuilder keys 目录
           echo ">>> [1/2] 安装 nikki 签名公钥..."
           APK_KEYS_DIR=$(find imagebuilder -path "*/apk/keys" -type d | head -1)
@@ -78,12 +82,12 @@ jobs:
             echo "❌ 未找到任何 keys 目录"; exit 1
           fi
           echo ">>> keys 目录：${APK_KEYS_DIR}"
-          wget -q "https://nikkinikki.pages.dev/public-key.pem" \
+          wget -q "${NIKKI_BASE}/public-key.pem" \
                -O "${APK_KEYS_DIR}/nikki.pem"
           echo ">>> 公钥已安装 ✅"
 
-          # 2. 注册 nikki 在线 feed（直接用官方 HTTPS repo，无需本地处理索引）
-          echo ">>> [2/2] 注册 nikki 在线 feed..."
+          # 2. 注册 nikki feed
+          echo ">>> [2/2] 注册 nikki feed..."
           REPO_CONF=$(find imagebuilder -maxdepth 2 \
                       -name "repositories.conf" | head -1)
           if [ -z "${REPO_CONF}" ]; then
@@ -94,9 +98,8 @@ jobs:
             echo "❌ 未找到 repositories 配置文件"; exit 1
           fi
           echo ">>> 配置文件：${REPO_CONF}"
-          OPENWRT_MAJOR="${OPENWRT_VERSION%.*}"
-          echo "https://nikkinikki-org.github.io/OpenWrt-nikki/${OPENWRT_MAJOR}/${ARCH}" \
-            >> "${REPO_CONF}"
+          echo ">>> feed URL：${NIKKI_FEED_URL}"
+          echo "${NIKKI_FEED_URL}" >> "${REPO_CONF}"
           echo ">>> 注册后 repositories 内容："
           cat "${REPO_CONF}"
           echo ">>> nikki feed 注册完成 ✅"
@@ -153,7 +156,6 @@ jobs:
           set -euo pipefail
           cd imagebuilder
 
-          # 找到 ImageBuilder 内置 apk 真实路径
           APK_REAL=$(find "$(pwd)" -name "apk" -type f -executable \
                      ! -path "/tmp/*" | head -1)
           if [ -z "${APK_REAL}" ]; then
@@ -161,7 +163,6 @@ jobs:
           fi
           echo ">>> 真实 apk 路径：${APK_REAL}"
 
-          # 用 printf 创建 wrapper，注入 --allow-untrusted
           mkdir -p /tmp/apk-wrapper
           printf '#!/bin/sh\nexec "%s" --allow-untrusted "$@"\n' \
             "${APK_REAL}" > /tmp/apk-wrapper/apk
