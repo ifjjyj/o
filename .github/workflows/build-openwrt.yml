@@ -34,7 +34,7 @@ jobs:
           sudo apt-get install -y \
             build-essential libncurses-dev zlib1g-dev gawk \
             gettext libssl-dev xsltproc rsync wget unzip python3 \
-            qemu-utils
+            qemu-utils apk-tools
           echo ">>> 依赖安装完成"
 
       - name: 💾 Cache ImageBuilder
@@ -64,7 +64,7 @@ jobs:
             echo "✅ ImageBuilder 新鲜下载（版本 ${OPENWRT_VERSION}）"
           fi
 
-      - name: 🔌 Setup nikki — inject packages into ImageBuilder local repo
+      - name: 🔌 Setup nikki feed
         run: |
           set -euo pipefail
 
@@ -72,8 +72,29 @@ jobs:
           NIKKI_TAR="nikki_${ARCH}-openwrt-${OPENWRT_MAJOR}.tar.gz"
           NIKKI_URL="https://github.com/nikkinikki-org/OpenWrt-nikki/releases/latest/download/${NIKKI_TAR}"
 
-          # 1. 安装 nikki 签名公钥
-          echo ">>> [1/5] 安装 nikki 签名公钥..."
+          # 1. 下载并解压 nikki release tarball
+          echo ">>> [1/4] 下载 ${NIKKI_TAR}..."
+          wget --progress=bar:force "${NIKKI_URL}" -O nikki-release.tar.gz
+          mkdir -p /tmp/nikki-feed
+          tar -xzf nikki-release.tar.gz -C /tmp/nikki-feed/
+          echo ">>> 解压后文件："
+          find /tmp/nikki-feed -type f | sort
+
+          # 2. 用 Ubuntu 完整 apk-tools 生成合法 APKINDEX.tar.gz
+          echo ">>> [2/4] 生成 APKINDEX.tar.gz..."
+          NIKKI_REPO="/tmp/nikki-repo"
+          mkdir -p "${NIKKI_REPO}"
+          cp /tmp/nikki-feed/*.apk "${NIKKI_REPO}/"
+          apk index \
+            --no-sign \
+            -o "${NIKKI_REPO}/APKINDEX.tar.gz" \
+            "${NIKKI_REPO}"/*.apk
+          echo ">>> APKINDEX.tar.gz 生成完成 ✅"
+          echo ">>> feed 目录内容："
+          ls -lh "${NIKKI_REPO}/"
+
+          # 3. 安装 nikki 公钥到 ImageBuilder keys 目录
+          echo ">>> [3/4] 安装 nikki 签名公钥..."
           APK_KEYS_DIR=$(find imagebuilder -path "*/apk/keys" -type d | head -1)
           if [ -z "${APK_KEYS_DIR}" ]; then
             APK_KEYS_DIR=$(find imagebuilder -name "keys" -type d | head -1)
@@ -86,54 +107,22 @@ jobs:
                -O "${APK_KEYS_DIR}/nikki.pem"
           echo ">>> 公钥已安装 ✅"
 
-          # 2. 下载并解压 nikki release tarball
-          echo ">>> [2/5] 下载 ${NIKKI_TAR}..."
-          wget --progress=bar:force "${NIKKI_URL}" -O nikki-release.tar.gz
-          mkdir -p /tmp/nikki-feed
-          tar -xzf nikki-release.tar.gz -C /tmp/nikki-feed/
-          echo ">>> 解压后文件："
-          find /tmp/nikki-feed -type f | sort
-
-          APK_SRC=$(find /tmp/nikki-feed -name "*.apk" | head -1)
-          if [ -z "${APK_SRC}" ]; then
-            echo "❌ tarball 内未找到任何 .apk 文件"; exit 1
+          # 4. 注册 feed 到 ImageBuilder repositories 配置
+          echo ">>> [4/4] 注册 feed..."
+          REPO_CONF=$(find imagebuilder -maxdepth 2 \
+                      -name "repositories.conf" | head -1)
+          if [ -z "${REPO_CONF}" ]; then
+            REPO_CONF=$(find imagebuilder -maxdepth 2 \
+                        -name "repositories*" | head -1)
           fi
-          FEED_SRC=$(dirname "${APK_SRC}")
-          echo ">>> APK 源目录：${FEED_SRC}"
-
-          # 3. 找到 ImageBuilder 本地 packages 目录
-          echo ">>> [3/5] 定位 ImageBuilder 本地 packages 目录..."
-          LOCAL_PKG_DIR=$(find imagebuilder/packages -type d \
-                          -name "${ARCH}" 2>/dev/null | head -1)
-          if [ -z "${LOCAL_PKG_DIR}" ]; then
-            LOCAL_PKG_DIR=$(find imagebuilder -maxdepth 2 \
-                            -type d -name "packages" | head -1)
+          if [ -z "${REPO_CONF}" ]; then
+            echo "❌ 未找到 repositories 配置文件"; exit 1
           fi
-          if [ -z "${LOCAL_PKG_DIR}" ]; then
-            echo "❌ 未找到 ImageBuilder packages 目录"; exit 1
-          fi
-          echo ">>> 本地 packages 目录：${LOCAL_PKG_DIR}"
-
-          # 4. 复制 nikki .apk 到本地 packages
-          echo ">>> [4/5] 复制 nikki .apk 文件..."
-          cp "${FEED_SRC}"/*.apk "${LOCAL_PKG_DIR}/"
-          echo ">>> nikki 相关包："
-          ls -lh "${LOCAL_PKG_DIR}/" | grep -i nikki || true
-
-          # 5. 用 ImageBuilder 自带 apk 二进制重建 APKINDEX，完全不用 Python
-          echo ">>> [5/5] 重建 APKINDEX..."
-          APK_BIN=$(find imagebuilder -name "apk" -type f -executable | head -1)
-          if [ -z "${APK_BIN}" ]; then
-            echo "❌ 未找到 ImageBuilder 内置 apk 二进制"; exit 1
-          fi
-          echo ">>> 使用 apk 二进制：${APK_BIN}"
-          "${APK_BIN}" index \
-            --allow-untrusted \
-            -o "${LOCAL_PKG_DIR}/APKINDEX.tar.gz" \
-            "${LOCAL_PKG_DIR}"/*.apk
-          echo ">>> APKINDEX 重建完成 ✅"
-          echo ">>> packages 目录 .apk 数量：$(ls ${LOCAL_PKG_DIR}/*.apk | wc -l)"
-          echo ">>> nikki 包已并入本地 feed，无需外部 feed 注册 ✅"
+          echo ">>> 配置文件：${REPO_CONF}"
+          echo "file://${NIKKI_REPO}" >> "${REPO_CONF}"
+          echo ">>> 注册后 repositories 内容："
+          cat "${REPO_CONF}"
+          echo ">>> nikki feed 注册完成 ✅"
 
       - name: 🔧 Inject sing-box ${{ env.SINGBOX_VERSION }} binary
         run: |
@@ -195,7 +184,7 @@ jobs:
           fi
           echo ">>> 真实 apk 路径：${APK_REAL}"
 
-          # 用 printf 写 wrapper，完全避免 heredoc
+          # 用 printf 创建 wrapper，注入 --allow-untrusted
           mkdir -p /tmp/apk-wrapper
           printf '#!/bin/sh\nexec "%s" --allow-untrusted "$@"\n' \
             "${APK_REAL}" > /tmp/apk-wrapper/apk
