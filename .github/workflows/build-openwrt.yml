@@ -63,7 +63,7 @@ jobs:
           else
             echo "✅ ImageBuilder 新鲜下载（版本 ${OPENWRT_VERSION}）"
           fi
-      - name: 🔌 Setup nikki feed from release tarball
+- name: 🔌 Setup nikki feed from release tarball
         run: |
           set -euo pipefail
 
@@ -74,81 +74,139 @@ jobs:
           # ---------------------------------------------------------------
           # 第一步：安装 nikki 签名公钥
           # ---------------------------------------------------------------
-          echo ">>> [1/3] 安装 nikki 签名公钥..."
+          echo ">>> [1/4] 安装 nikki 签名公钥..."
           APK_KEYS_DIR=$(find imagebuilder -path "*/apk/keys" -type d | head -1)
           if [ -z "${APK_KEYS_DIR}" ]; then
             APK_KEYS_DIR=$(find imagebuilder -name "keys" -type d | head -1)
           fi
           if [ -z "${APK_KEYS_DIR}" ]; then
             echo "❌ 未找到任何 keys 目录"
-            find imagebuilder -name "keys" -type d
             exit 1
           fi
           echo ">>> keys 目录：${APK_KEYS_DIR}"
           wget -q "https://nikkinikki.pages.dev/public-key.pem" \
                -O "${APK_KEYS_DIR}/nikki.pem"
-          echo ">>> 公钥已安装：${APK_KEYS_DIR}/nikki.pem ✅"
+          echo ">>> 公钥已安装 ✅"
           ls -lh "${APK_KEYS_DIR}/"
 
           # ---------------------------------------------------------------
-          # 第二步：下载并解压完整 release tarball
+          # 第二步：下载并解压 release tarball
           # ---------------------------------------------------------------
-          echo ">>> [2/3] 下载 ${NIKKI_TAR}..."
+          echo ">>> [2/4] 下载 ${NIKKI_TAR}..."
           wget --progress=bar:force "${NIKKI_URL}" -O nikki-release.tar.gz
-
           mkdir -p /tmp/nikki-feed
           tar -xzf nikki-release.tar.gz -C /tmp/nikki-feed/
-
           echo ">>> 解压后全部文件："
           find /tmp/nikki-feed -type f | sort
 
-          # 定位含 APK 文件的目录
           APK_SRC=$(find /tmp/nikki-feed -name "*.apk" | head -1)
           if [ -z "${APK_SRC}" ]; then
-            echo "❌ tarball 内未找到任何 .apk 文件"
-            exit 1
+            echo "❌ tarball 内未找到任何 .apk 文件"; exit 1
           fi
           FEED_SRC=$(dirname "${APK_SRC}")
           echo ">>> APK 源目录：${FEED_SRC}"
-          ls -lh "${FEED_SRC}/"
 
           # ---------------------------------------------------------------
-          # 第三步：组织 feed 目录结构并注册
-          # 直接复用 tarball 自带的已签名 packages.adb，不重新生成索引
+          # 第三步：组织 feed 目录
           # ---------------------------------------------------------------
-          echo ">>> [3/3] 组织 feed 目录结构..."
-
+          echo ">>> [3/4] 组织 feed 目录..."
           NIKKI_REPO="/tmp/nikki-repo"
           NIKKI_PKG_DIR="${NIKKI_REPO}/${ARCH}"
           mkdir -p "${NIKKI_PKG_DIR}"
-
-          # 复制所有 APK
           cp "${FEED_SRC}"/*.apk "${NIKKI_PKG_DIR}/"
 
-          # 优先使用 tarball 自带的已签名 packages.adb
+          # 优先复用 tarball 自带的已签名 packages.adb
           if [ -f "${FEED_SRC}/packages.adb" ]; then
             cp "${FEED_SRC}/packages.adb" "${NIKKI_PKG_DIR}/"
-            echo ">>> 使用 tarball 自带已签名 packages.adb ✅"
+            echo ">>> 使用 tarball 自带 packages.adb ✅"
           else
-            echo "⚠️  tarball 中无 packages.adb，尝试用 apk 工具重新生成..."
-            APK_BIN=$(find imagebuilder -name "apk" -type f -executable | head -1)
-            if [ -z "${APK_BIN}" ]; then
-              echo "❌ 未找到 apk 工具"; exit 1
+            # 在 tarball 其他位置查找
+            PDB=$(find /tmp/nikki-feed -name "packages.adb" | head -1)
+            if [ -n "${PDB}" ]; then
+              cp "${PDB}" "${NIKKI_PKG_DIR}/"
+              echo ">>> 找到并复制 packages.adb（来自 ${PDB}）✅"
+            else
+              echo "⚠️  tarball 中无 packages.adb，用 apk 工具重新生成..."
+              APK_BIN=$(find imagebuilder -name "apk" -type f -executable | head -1)
+              [ -z "${APK_BIN}" ] && { echo "❌ 未找到 apk 工具"; exit 1; }
+              (cd "${NIKKI_PKG_DIR}" && \
+                "${OLDPWD}/${APK_BIN}" mkndx \
+                  --allow-untrusted \
+                  --output packages.adb \
+                  --description "nikki feed" \
+                  *.apk)
+              echo ">>> packages.adb 生成完成 ✅"
             fi
-            cd "${NIKKI_PKG_DIR}"
-            "${OLDPWD}/${APK_BIN}" mkndx \
-              --allow-untrusted \
-              --output packages.adb \
-              --description "nikki feed" \
-              *.apk
-            cd "${OLDPWD}"
-            echo ">>> packages.adb 重新生成完成（无签名，构建时需 --allow-untrusted）⚠️"
           fi
+
+          # ---------------------------------------------------------------
+          # 第四步：生成 APKINDEX.tar.gz
+          # ImageBuilder 内部的 apk 会先找这个旧格式索引，
+          # 找不到会报 warning 并跳过整个 feed，导致包不可见。
+          # 配合 make image 里的 --allow-untrusted 使用。
+          # ---------------------------------------------------------------
+          echo ">>> [4/4] 生成 APKINDEX.tar.gz..."
+          cat > /tmp/gen_apkindex.py << 'EOF'
+import tarfile, io, os, glob, hashlib, base64, sys
+
+def parse_pkginfo(content):
+    fields = {}
+    for line in content.splitlines():
+        if line.startswith('#') or '=' not in line:
+            continue
+        k, v = line.split('=', 1)
+        fields[k.strip()] = v.strip()
+    return fields
+
+target_dir = sys.argv[1]
+os.chdir(target_dir)
+
+entries = []
+for apk_path in sorted(glob.glob('*.apk')):
+    try:
+        with tarfile.open(apk_path, 'r:gz') as apk:
+            pi = apk.extractfile('.PKGINFO').read().decode()
+        f = parse_pkginfo(pi)
+        chk = 'Q1' + base64.b64encode(
+            hashlib.sha1(open(apk_path, 'rb').read()).digest()
+        ).decode()
+        lines = [
+            f"C:{chk}",
+            f"P:{f.get('pkgname', '')}",
+            f"V:{f.get('pkgver', '')}",
+            f"A:{f.get('arch', '')}",
+            f"S:{os.path.getsize(apk_path)}",
+            f"I:{f.get('size', '0')}",
+            f"T:{f.get('pkgdesc', '')}",
+            f"U:{f.get('url', '')}",
+            f"L:{f.get('license', '')}",
+        ]
+        for key, tag in [('origin', 'o'), ('maintainer', 'm'),
+                         ('builddate', 't'), ('depend', 'D'), ('provides', 'p')]:
+            if key in f:
+                lines.append(f"{tag}:{f[key]}")
+        lines.append('')
+        entries.append('\n'.join(lines))
+        print(f"  indexed: {f.get('pkgname', apk_path)}")
+    except Exception as e:
+        print(f"  warning: {apk_path}: {e}")
+
+idx = '\n'.join(entries).encode()
+buf = io.BytesIO()
+with tarfile.open(fileobj=buf, mode='w:gz') as tar:
+    info = tarfile.TarInfo(name='APKINDEX')
+    info.size = len(idx)
+    tar.addfile(info, io.BytesIO(idx))
+with open('APKINDEX.tar.gz', 'wb') as f:
+    f.write(buf.getvalue())
+print(f"APKINDEX.tar.gz 生成完成，共 {len(entries)} 个包 ✅")
+EOF
+          python3 /tmp/gen_apkindex.py "${NIKKI_PKG_DIR}"
 
           echo ">>> feed 目录内容："
           ls -lh "${NIKKI_PKG_DIR}/"
 
-          # 注册 feed：URL 只到 /tmp/nikki-repo，apk 自动追加 /$ARCH/
+          # 注册 feed
           cd imagebuilder
           REPO_FILE=$(find . -maxdepth 2 -name "repositories*" \
                         -not -path "*/\.*" | head -1)
@@ -157,128 +215,6 @@ jobs:
           echo ">>> 注册后 repositories 内容："
           cat "${REPO_FILE}"
           echo ">>> nikki feed 注册完成 ✅"
-          
-          # 格式二：APKINDEX.tar.gz（旧格式，file:// 优先查找）
-          # 写入脚本到临时文件再执行（规避 YAML 对 << 的误解析）
-          cat > /tmp/gen_apkindex.py << 'EOF'
-          import tarfile, io, os, glob, hashlib, base64
-
-          def parse_pkginfo(content):
-              fields = {}
-              for line in content.splitlines():
-                  if line.startswith('#') or '=' not in line:
-                      continue
-                  k, v = line.split('=', 1)
-                  fields[k.strip()] = v.strip()
-              return fields
-
-          entries = []
-          for apk_path in sorted(glob.glob('*.apk')):
-              try:
-                  with tarfile.open(apk_path, 'r:gz') as apk:
-                      pi = apk.extractfile('.PKGINFO').read().decode()
-                  f = parse_pkginfo(pi)
-                  chk = 'Q1' + base64.b64encode(
-                      hashlib.sha1(open(apk_path,'rb').read()).digest()
-                  ).decode()
-                  lines = [
-                      f"C:{chk}",
-                      f"P:{f.get('pkgname','')}",
-                      f"V:{f.get('pkgver','')}",
-                      f"A:{f.get('arch','')}",
-                      f"S:{os.path.getsize(apk_path)}",
-                      f"I:{f.get('size','0')}",
-                      f"T:{f.get('pkgdesc','')}",
-                      f"U:{f.get('url','')}",
-                      f"L:{f.get('license','')}",
-                  ]
-                  for key, tag in [('origin','o'),('maintainer','m'),
-                                   ('builddate','t'),('depend','D'),('provides','p')]:
-                      if key in f:
-                          lines.append(f"{tag}:{f[key]}")
-                  lines.append('')
-                  entries.append('\n'.join(lines))
-                  print(f"  indexed: {f.get('pkgname',apk_path)}")
-              except Exception as e:
-                  print(f"  warning: {apk_path}: {e}")
-
-          idx = '\n'.join(entries).encode()
-          buf = io.BytesIO()
-          with tarfile.open(fileobj=buf, mode='w:gz') as tar:
-              info = tarfile.TarInfo(name='APKINDEX')
-              info.size = len(idx)
-              tar.addfile(info, io.BytesIO(idx))
-          with open('APKINDEX.tar.gz', 'wb') as f:
-              f.write(buf.getvalue())
-          print(f"APKINDEX.tar.gz 生成完成，共 {len(entries)} 个包 ✅")
-          EOF
-          python3 /tmp/gen_apkindex.py
-
-          cd "${OLDPWD}"
-          echo ">>> 索引文件："
-          ls -lh "${NIKKI_PKG_DIR}/"
-
-          # 注册 feed：URL 只到 /tmp/nikki-repo，APK 自动追加 /$ARCH/
-          cd imagebuilder
-          REPO_FILE=$(find . -maxdepth 2 -name "repositories*" \
-                        -not -path "*/\.*" | head -1)
-          echo ">>> 配置文件：${REPO_FILE}"
-          echo "file://${NIKKI_REPO}" >> "${REPO_FILE}"
-          echo ">>> 注册后 repositories 内容："
-          cat "${REPO_FILE}"
-          echo ">>> nikki feed 注册完成 ✅"
-
-      - name: 🔧 Inject sing-box ${{ env.SINGBOX_VERSION }} binary (linux-arm64 → files overlay)
-        run: |
-          set -euo pipefail
-          SINGBOX_TAR="sing-box-${SINGBOX_VERSION}-linux-arm64.tar.gz"
-          SINGBOX_URL="https://github.com/SagerNet/sing-box/releases/download/v${SINGBOX_VERSION}/${SINGBOX_TAR}"
-
-          echo ">>> 下载 sing-box ${SINGBOX_VERSION} (linux-arm64)..."
-          wget -q "${SINGBOX_URL}" -O "${SINGBOX_TAR}"
-
-          mkdir -p singbox_extract
-          tar -xzf "${SINGBOX_TAR}" -C singbox_extract
-
-          SINGBOX_BIN=$(find singbox_extract -type f -name "sing-box" | head -1)
-          if [ -z "${SINGBOX_BIN}" ]; then
-            echo "❌ 未在压缩包中找到 sing-box 二进制"
-            exit 1
-          fi
-
-          mkdir -p files/usr/bin
-          cp "${SINGBOX_BIN}" files/usr/bin/sing-box
-          chmod +x files/usr/bin/sing-box
-
-          file files/usr/bin/sing-box
-          echo ">>> sing-box 注入完成 ✅"
-
-      - name: 🔧 Inject mihomo ${{ env.MIHOMO_VERSION }} binary (linux/arm64 → files overlay)
-        run: |
-          set -euo pipefail
-          MIHOMO_GZ="mihomo-linux-arm64-v${MIHOMO_VERSION}.gz"
-          MIHOMO_URL="https://github.com/MetaCubeX/mihomo/releases/download/v${MIHOMO_VERSION}/${MIHOMO_GZ}"
-
-          echo ">>> 下载 mihomo ${MIHOMO_VERSION} (linux/arm64)..."
-          wget -q "${MIHOMO_URL}" -O mihomo.gz
-          gunzip -f mihomo.gz
-
-          mkdir -p files/usr/bin
-          cp mihomo files/usr/bin/mihomo
-          chmod +x files/usr/bin/mihomo
-
-          file files/usr/bin/mihomo
-          echo ">>> mihomo 注入完成 ✅"
-
-      - name: 🔍 Verify profile exists
-        run: |
-          cd imagebuilder
-          make info | grep -A3 "${PROFILE}" || {
-            echo "❌ Profile '${PROFILE}' 不存在"
-            make info
-            exit 1
-          }
-          echo ">>> Profile 确认存在 ✅"
 
       - name: 🏗️ Build firmware
         run: |
@@ -286,6 +222,12 @@ jobs:
           cd imagebuilder
           echo ">>> 开始构建固件，Profile: ${PROFILE}，时间: $(date)"
           echo "---"
+
+          # 在 ImageBuilder 的 Makefile 里为 apk 调用追加 --allow-untrusted，
+          # 使本地未签名的 APKINDEX.tar.gz 被接受
+          sed -i 's/$(APK) fetch/$(APK) fetch --allow-untrusted/g' Makefile
+          sed -i 's/$(APK) add/$(APK) add --allow-untrusted/g'     Makefile
+
           make image \
             PROFILE="${PROFILE}" \
             PACKAGES="apk-mbedtls base-files ca-bundle dnsmasq-full dropbear \
