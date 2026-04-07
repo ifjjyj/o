@@ -3,7 +3,7 @@ config status 'status'
 
 config config 'config'
 	option enabled '1'
-	option start_delay '30'
+	option start_delay '0'
 	option scheduled_restart '0'
 	option cron_expression '0 3 * * *'
 	option test_profile '1'
