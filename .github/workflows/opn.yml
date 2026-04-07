@@ -256,6 +256,6 @@ jobs:
           draft: false
           prerelease: false
           files: |
-            imagebuilder/bin/targets/mediatek/filogic/openwrt-${{ env.OPENWRT_VERSION }}-mediatek-filogic-qihoo_360t7-squashfs-sysupgrade.itb
+            imagebuilder/bin/targets/mediatek/filogic/openwrt-${{ env.OPENWRT_VERSION }}-360t7-squashfs-sysupgrade.itb
             imagebuilder/bin/targets/mediatek/filogic/sha256sums
           fail_on_unmatched_files: true
