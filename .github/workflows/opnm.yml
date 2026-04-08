@@ -1,10 +1,10 @@
-name: Build OpenWrt for Qihoo 360T7
+name: 360T7 opnm
 
 on:
   workflow_dispatch:
   push:
     paths:
-      - '.github/workflows/build-openwrt.yml'
+      - '.github/workflows/opnm.yml'
       - 'files/**'
 
 env:
@@ -12,7 +12,7 @@ env:
   TARGET: "mediatek/filogic"
   PROFILE: "qihoo_360t7"
   ARCH: "aarch64_cortex-a53"
-  MIHOMO_VERSION: "1.19.22"
+  MIHOMO_VERSION: "1.19.23"
 
 permissions:
   contents: write
@@ -241,7 +241,7 @@ jobs:
         id: tag
         run: |
           DATE=$(date -u '+%Y%m%d')
-          TAG="v${OPENWRT_VERSION}-${DATE}-r${{ github.run_number }}"
+          TAG="${DATE}-r${{ github.run_number }}"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo ">>> Release tag: ${TAG}"
 
