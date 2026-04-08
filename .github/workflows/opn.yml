@@ -33,7 +33,7 @@ jobs:
           sudo apt-get install -y \
             build-essential libncurses-dev zlib1g-dev gawk \
             gettext libssl-dev xsltproc rsync wget unzip python3 \
-            qemu-utils
+            qemu-utils u-boot-tools squashfs-tools
           echo ">>> 依赖安装完成"
 
       - name: 💾 Cache ImageBuilder
@@ -81,7 +81,10 @@ jobs:
           fi
           echo ">>> keys 目录：${APK_KEYS_DIR}"
           wget -q "${NIKKI_BASE}/public-key.pem" \
-               -O "${APK_KEYS_DIR}/nikki.pem"
+               -O "${APK_KEYS_DIR}/nikki.pem" || {
+            echo "❌ nikki 公钥下载失败：${NIKKI_BASE}/public-key.pem"
+            exit 1
+          }
           echo ">>> 公钥已安装 ✅"
 
           echo ">>> [2/2] 注册 nikki feed..."
@@ -100,21 +103,6 @@ jobs:
           echo ">>> 注册后 repositories 内容："
           cat "${REPO_CONF}"
           echo ">>> nikki feed 注册完成 ✅"
-
-      - name: 🔧 Inject mihomo ${{ env.MIHOMO_VERSION }} binary
-        run: |
-          set -euo pipefail
-          MIHOMO_GZ="mihomo-linux-arm64-v${MIHOMO_VERSION}.gz"
-          MIHOMO_URL="https://github.com/MetaCubeX/mihomo/releases/download/v${MIHOMO_VERSION}/${MIHOMO_GZ}"
-
-          echo ">>> 下载 mihomo ${MIHOMO_VERSION} (linux/arm64)..."
-          wget -q "${MIHOMO_URL}" -O mihomo.gz
-          gunzip -f mihomo.gz
-          mkdir -p files/usr/bin
-          cp mihomo files/usr/bin/mihomo
-          chmod +x files/usr/bin/mihomo
-          file files/usr/bin/mihomo
-          echo ">>> mihomo 注入完成 ✅"
 
       - name: 🔍 Verify profile exists
         run: |
@@ -166,7 +154,7 @@ jobs:
               luci-app-attendedsysupgrade luci-i18n-attendedsysupgrade-zh-cn \
               luci-i18n-base-zh-cn luci-i18n-firewall-zh-cn \
               luci-i18n-package-manager-zh-cn \
-              nikki luci-app-nikki luci-i18n-nikki-zh-cn -mihomo" \
+              nikki luci-app-nikki luci-i18n-nikki-zh-cn" \
             FILES="../files"
           echo "---"
           echo ">>> 构建完成，时间: $(date)"
@@ -178,7 +166,6 @@ jobs:
           if [ -f "${OUTDIR}/${ORIG_NAME}" ]; then
             mv "${OUTDIR}/${ORIG_NAME}" "${OUTDIR}/${SHORT_NAME}"
             echo ">>> 已重命名：${ORIG_NAME} → ${SHORT_NAME} ✅"
-            # 同步更新 sha256sums 中的文件名记录
             sed -i "s/${ORIG_NAME}/${SHORT_NAME}/g" "${OUTDIR}/sha256sums"
             echo ">>> sha256sums 已同步更新 ✅"
           else
@@ -187,18 +174,284 @@ jobs:
             exit 1
           fi
 
+      - name: 🔧 Patch mihomo ${{ env.MIHOMO_VERSION }} into firmware
+        run: |
+          set -euo pipefail
+          OUTDIR="imagebuilder/bin/targets/mediatek/filogic"
+          FIRMWARE="${OUTDIR}/openwrt-${OPENWRT_VERSION}-360t7-squashfs-sysupgrade.itb"
+          WORK="/tmp/fw-patch"
+          mkdir -p "${WORK}"
+
+          # ── Step 1: 下载 mihomo ──────────────────────────────────────────
+          echo ">>> [1/6] 下载 mihomo ${MIHOMO_VERSION} (linux/arm64)..."
+          wget -q \
+            "https://github.com/MetaCubeX/mihomo/releases/download/v${MIHOMO_VERSION}/mihomo-linux-arm64-v${MIHOMO_VERSION}.gz" \
+            -O "${WORK}/mihomo.gz"
+          gunzip "${WORK}/mihomo.gz"
+          chmod +x "${WORK}/mihomo"
+          file "${WORK}/mihomo"
+
+          # ── Step 2: 分析 ITB 结构 ────────────────────────────────────────
+          echo ">>> [2/6] 分析 ITB 结构..."
+          dumpimage -l "${FIRMWARE}"
+
+          # ── Step 3: 逐个提取组件，定位 squashfs ──────────────────────────
+          echo ">>> [3/6] 提取 ITB 各组件..."
+          ROOTFS_IDX=-1
+          idx=0
+          while true; do
+            BIN="${WORK}/part${idx}.bin"
+            if ! dumpimage -T flat_dt -p ${idx} -o "${BIN}" "${FIRMWARE}" 2>/dev/null; then
+              echo ">>> 共提取到 ${idx} 个组件"
+              break
+            fi
+            FTYPE=$(file "${BIN}")
+            echo "  part${idx}: ${FTYPE##*: }"
+            if echo "${FTYPE}" | grep -qi "squashfs"; then
+              ROOTFS_IDX=${idx}
+              echo "  → squashfs rootfs 在 index ${idx} ✅"
+            fi
+            idx=$((idx + 1))
+          done
+          [ "${ROOTFS_IDX}" -ge 0 ] || { echo "❌ 未找到 squashfs 组件"; exit 1; }
+
+          # ── Step 4: 解包，替换 mihomo，验证 ──────────────────────────────
+          echo ">>> [4/6] 解包 squashfs..."
+          unsquashfs -d "${WORK}/rootfs" "${WORK}/part${ROOTFS_IDX}.bin"
+
+          echo ">>> 替换前 mihomo："
+          file "${WORK}/rootfs/usr/bin/mihomo" 2>/dev/null || echo "  (未找到)"
+
+          cp "${WORK}/mihomo" "${WORK}/rootfs/usr/bin/mihomo"
+          chmod +x "${WORK}/rootfs/usr/bin/mihomo"
+
+          echo ">>> 替换后 mihomo："
+          file "${WORK}/rootfs/usr/bin/mihomo"
+
+          # ── Step 5: 检测压缩格式并重打包 squashfs ────────────────────────
+          echo ">>> [5/6] 重新打包 squashfs..."
+          SQFS_STAT=$(unsquashfs -s "${WORK}/part${ROOTFS_IDX}.bin")
+          echo "${SQFS_STAT}"
+
+          BLOCK_SIZE=$(echo "${SQFS_STAT}" | grep -i "block size" | grep -oP '\d+' | head -1)
+          BLOCK_SIZE=${BLOCK_SIZE:-262144}
+
+          # 使用 bash 数组避免含空格字符串的 word-splitting 问题
+          if echo "${SQFS_STAT}" | grep -qi "zstd"; then
+            SQCOMP=(-comp zstd)
+          else
+            SQCOMP=(-comp xz -Xbcj arm)
+          fi
+          echo ">>> 压缩参数：${SQCOMP[*]}，块大小：${BLOCK_SIZE}"
+
+          mksquashfs "${WORK}/rootfs" "${WORK}/part${ROOTFS_IDX}.bin" \
+            -noappend -b "${BLOCK_SIZE}" "${SQCOMP[@]}"
+
+          echo ">>> 各组件大小："
+          ls -lh "${WORK}"/part*.bin
+
+          # ── Step 6: 解析 ITB 元数据，生成 .its，用 mkimage 重建 ITB ──────
+          echo ">>> [6/6] 重建 ITB..."
+
+          cat > "${WORK}/rebuild_itb.py" << 'PYEOF'
+#!/usr/bin/env python3
+"""
+解析原始 ITB 的 dumpimage 输出，动态生成 .its 文件，
+再用 mkimage 重建包含新 squashfs 的 ITB。
+
+修复：
+  - configurations 块不再错误地插入 hash@1 节点
+  - Loadables 多值正确生成逗号分隔的独立字符串
+  - its_type() 未知类型打印警告而非静默 fallback
+"""
+import subprocess, re, os, sys, shutil
+
+work     = sys.argv[1]   # 工作目录，含 part*.bin
+firmware = sys.argv[2]   # 原始固件路径（最终会被覆盖）
+
+# ── 解析 dumpimage -l 输出 ─────────────────────────────────────────────────
+result = subprocess.run(
+    ['dumpimage', '-l', firmware],
+    capture_output=True, text=True, check=True
+)
+dump = result.stdout
+print("=== 原始 ITB 结构 ===")
+print(dump)
+
+images, configs = [], []
+default_cfg, current = None, None
+
+for line in dump.split('\n'):
+    # 默认配置
+    m = re.search(r"Default Configuration: '([^']+)'", line)
+    if m:
+        default_cfg = m.group(1)
+        continue
+
+    # Image 条目
+    m = re.match(r'\s+Image (\d+) \(([^)]+)\)', line)
+    if m:
+        current = {'idx': int(m.group(1)), 'name': m.group(2), 'props': {}, 'is_cfg': False}
+        images.append(current)
+        continue
+
+    # Configuration 条目
+    m = re.match(r'\s+Configuration (\d+) \(([^)]+)\)', line)
+    if m:
+        current = {'idx': int(m.group(1)), 'name': m.group(2), 'props': {}, 'is_cfg': True}
+        configs.append(current)
+        continue
+
+    if current is None:
+        continue
+
+    for key, pat in [
+        ('Description',  r'Description:\s+(.+)'),
+        ('Type',         r'Type:\s+(.+)'),
+        ('Architecture', r'Architecture:\s+(.+)'),
+        ('OS',           r'OS:\s+(.+)'),
+        ('Load Address', r'Load Address:\s+(0x[0-9a-fA-F]+)'),
+        ('Entry Point',  r'Entry Point:\s+(0x[0-9a-fA-F]+)'),
+        ('Kernel',       r'^\s+Kernel:\s+(.+)'),
+        ('FDT',          r'^\s+FDT:\s+(.+)'),
+        ('Loadables',    r'^\s+Loadables:\s+(.+)'),
+        ('Ramdisk',      r'^\s+Ramdisk:\s+(.+)'),
+    ]:
+        m2 = re.search(pat, line)
+        if m2:
+            current['props'][key] = m2.group(1).strip()
+
+# ── 类型转换辅助函数 ────────────────────────────────────────────────────────
+def its_type(t):
+    t = t.lower()
+    if 'kernel'       in t: return 'kernel'
+    if 'flat device'  in t: return 'flat_dt'
+    if 'ramdisk'      in t: return 'ramdisk'
+    if 'filesystem'   in t: return 'filesystem'
+    if 'script'       in t: return 'script'
+    if 'multi'        in t: return 'multi'
+    # 无法识别时打印警告，不静默 fallback
+    print(f'⚠️  未知 image type: "{t}"，fallback 为 "kernel"', file=sys.stderr)
+    return 'kernel'
+
+def its_arch(a):
+    a = a.lower()
+    return 'arm64' if ('aarch64' in a or 'arm64' in a) else 'arm'
+
+def its_loadables(raw):
+    """将 'a, b, c' 或 'a b c' 格式转为 '"a", "b", "c"' 形式"""
+    # dumpimage 输出通常以逗号或空格分隔，统一处理
+    sep = ',' if ',' in raw else ' '
+    items = [s.strip() for s in raw.split(sep) if s.strip()]
+    return ', '.join(f'"{item}"' for item in items)
+
+# ── 生成 .its 文件 ──────────────────────────────────────────────────────────
+lines = [
+    '/dts-v1/;', '',
+    '/ {',
+    '\tdescription = "OpenWrt for qihoo_360t7";',
+    '\t#address-cells = <1>;', '',
+    '\timages {',
+]
+
+for img in images:
+    idx  = img['idx']
+    name = img['name']
+    p    = img['props']
+    t    = its_type(p.get('Type', 'kernel'))
+    arch = its_arch(p.get('Architecture', 'AArch64'))
+
+    lines += [
+        f'\t\t{name} {{',
+        f'\t\t\tdescription = "{p.get("Description", name)}";',
+        f'\t\t\tdata = /incbin/("{work}/part{idx}.bin");',
+        f'\t\t\ttype = "{t}";',
+        f'\t\t\tarch = "{arch}";',
+    ]
+    if 'OS' in p:
+        lines.append('\t\t\tos = "linux";')
+    lines.append('\t\t\tcompression = "none";')
+    if 'Load Address' in p:
+        lines.append(f'\t\t\tload = <{hex(int(p["Load Address"], 16))}>;')
+    if 'Entry Point' in p:
+        lines.append(f'\t\t\tentry = <{hex(int(p["Entry Point"], 16))}>;')
+    # hash 节点仅在 images 块内有效
+    lines += ['\t\t\thash@1 { algo = "crc32"; };', '\t\t};']
+
+lines += ['\t};', '', '\tconfigurations {']
+if default_cfg:
+    lines.append(f'\t\tdefault = "{default_cfg}";')
+
+for cfg in configs:
+    name = cfg['name']
+    p    = cfg['props']
+    lines.append(f'\t\t{name} {{')
+    if 'Description' in p:
+        lines.append(f'\t\t\tdescription = "{p["Description"]}";')
+    if 'Kernel'    in p:
+        lines.append(f'\t\t\tkernel = "{p["Kernel"]}";')
+    if 'FDT'       in p:
+        lines.append(f'\t\t\tfdt = "{p["FDT"]}";')
+    if 'Ramdisk'   in p:
+        lines.append(f'\t\t\tramdisk = "{p["Ramdisk"]}";')
+    if 'Loadables' in p:
+        # 修复：多值必须是逗号分隔的独立字符串，不能是单一字符串
+        lines.append(f'\t\t\tloadables = {its_loadables(p["Loadables"])};')
+    # configurations 块内不能有 hash 节点，已移除
+    lines.append('\t\t};')
+
+lines += ['\t};', '};', '']
+
+its_path = f'{work}/image.its'
+with open(its_path, 'w') as f:
+    f.write('\n'.join(lines))
+
+print("=== 生成的 .its 文件 ===")
+print(open(its_path).read())
+
+# ── 调用 mkimage 重建 ITB ───────────────────────────────────────────────────
+new_itb = f'{work}/new.itb'
+r = subprocess.run(
+    ['mkimage', '-f', its_path, new_itb],
+    capture_output=True, text=True
+)
+print(r.stdout)
+if r.stderr:
+    print(r.stderr, file=sys.stderr)
+if r.returncode != 0:
+    print('❌ mkimage 重建 ITB 失败', file=sys.stderr)
+    sys.exit(1)
+
+# 用新 ITB 覆盖原固件
+shutil.copy2(new_itb, firmware)
+size = os.path.getsize(firmware)
+print(f'✅ ITB 重建完成，已覆盖原固件：{firmware}')
+print(f'   文件大小：{size:,} bytes ({size/1024/1024:.2f} MiB)')
+PYEOF
+
+          python3 "${WORK}/rebuild_itb.py" "${WORK}" "${FIRMWARE}"
+
+          # 重建后更新 sha256sums
+          FILENAME="openwrt-${OPENWRT_VERSION}-360t7-squashfs-sysupgrade.itb"
+          NEW_SHA=$(sha256sum "${FIRMWARE}" | awk '{print $1}')
+          sed -i "s/^[0-9a-f]*  ${FILENAME}$/${NEW_SHA}  ${FILENAME}/" \
+            "${OUTDIR}/sha256sums"
+          echo ">>> sha256sums 已更新 ✅"
+          echo ">>> mihomo ${MIHOMO_VERSION} 替换完成 ✅"
+
       - name: ✅ Verify output
         run: |
           cd imagebuilder
-          SYSUPGRADE=$(ls bin/targets/mediatek/filogic/*sysupgrade* 2>/dev/null)
-          if [ -z "$SYSUPGRADE" ]; then
+          OUTDIR="bin/targets/mediatek/filogic"
+          SYSUPGRADE=$(ls "${OUTDIR}"/*sysupgrade* 2>/dev/null | head -1)
+          if [ -z "${SYSUPGRADE}" ]; then
             echo "❌ 未找到 sysupgrade 固件"; exit 1
           fi
-          ls -lh bin/targets/mediatek/filogic/
+          ls -lh "${OUTDIR}/"
           echo ""
-          cat bin/targets/mediatek/filogic/sha256sums
+          cat "${OUTDIR}/sha256sums"
           echo ""
-          echo "✅ 固件构建成功：$(basename $SYSUPGRADE)"
+          echo "✅ 固件构建成功：$(basename ${SYSUPGRADE})"
 
       - name: 🏷️ Generate release tag
         id: tag
@@ -218,48 +471,52 @@ jobs:
           SHA256=$(grep "${FILENAME}" "${OUTDIR}/sha256sums" | awk '{print $1}')
           FILESIZE=$(ls -lh "${FIRMWARE}" | awk '{print $5}')
           BUILD_TIME=$(date -u '+%Y-%m-%d %H:%M UTC')
+          OWT_VER="${OPENWRT_VERSION}"
+          MH_VER="${MIHOMO_VERSION}"
+          GH_SHA="${{ github.sha }}"
 
           cat > /tmp/release_notes.md << EOF
-          ## OpenWrt 固件 - Qihoo 360T7
+## OpenWrt 固件 - Qihoo 360T7
 
-          | 项目 | 值 |
-          |------|-----|
-          | OpenWrt 版本 | \`${OPENWRT_VERSION}\` |
-          | mihomo 版本 | \`${MIHOMO_VERSION}\` |
-          | 构建时间 | ${BUILD_TIME} |
-          | 固件大小 | ${FILESIZE} |
-          | Commit | \`${{ github.sha }}\` |
+| 项目 | 值 |
+|------|-----|
+| OpenWrt 版本 | \`${OWT_VER}\` |
+| mihomo 版本 | \`${MH_VER}\` |
+| 构建时间 | ${BUILD_TIME} |
+| 固件大小 | ${FILESIZE} |
+| Commit | \`${GH_SHA}\` |
 
-          ### 内置组件
+### 内置组件
 
-          - **nikki** (luci-app-nikki)，mihomo 内核已升级至 \`v${MIHOMO_VERSION}\`
-          - **LuCI** 中文界面
-          - dnsmasq-full / nftables / kmod-tun / kmod-nft-tproxy 等透明代理依赖
+- **nikki** (luci-app-nikki)，mihomo 内核已升级至 \`v${MH_VER}\`
+- **LuCI** 中文界面
+- dnsmasq-full / nftables / kmod-tun / kmod-nft-tproxy 等透明代理依赖
 
-          ### 二进制覆盖说明
+### 二进制覆盖说明
 
-          > nikki 自带 mihomo，本固件通过 files overlay 将其替换为 \`${MIHOMO_VERSION}\`。
+> nikki 自带 mihomo，本固件通过构建后解包 ITB、替换 squashfs 内核二进制的方式，
+> 将其升级为 \`v${MH_VER}\`。
 
-          ### SHA256 校验
+### SHA256 校验
 
-          \`\`\`
-          ${SHA256}  ${FILENAME}
-          \`\`\`
+\`\`\`
+${SHA256}  ${FILENAME}
+\`\`\`
 
-          ### 刷写说明
+### 刷写说明
 
-          > ⚠️ 首次从其他固件切换请先备份配置
+> ⚠️ 首次从其他固件切换请先备份配置
 
-          **保留配置刷入：**
-          \`\`\`
-          sysupgrade -v /tmp/${FILENAME}
-          \`\`\`
+**保留配置刷入：**
+\`\`\`
+sysupgrade -v /tmp/${FILENAME}
+\`\`\`
 
-          **不保留配置（推荐首次刷入）：**
-          \`\`\`
-          sysupgrade -n /tmp/${FILENAME}
-          \`\`\`
-          EOF
+**不保留配置（推荐首次刷入）：**
+\`\`\`
+sysupgrade -n /tmp/${FILENAME}
+\`\`\`
+EOF
 
           echo "notes_file=/tmp/release_notes.md" >> "$GITHUB_OUTPUT"
 
