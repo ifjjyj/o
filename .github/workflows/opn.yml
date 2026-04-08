@@ -242,11 +242,32 @@ jobs:
             unsquashfs -d '${ROOTFS_DIR}' '${SQFS_BIN}'
 
             echo '>>> 替换前 mihomo：'
-            file '${ROOTFS_DIR}/usr/bin/mihomo' 2>/dev/null || echo '  (未找到)'
-            cp '${MIHOMO_SRC}' '${ROOTFS_DIR}/usr/bin/mihomo'
-            chmod +x '${ROOTFS_DIR}/usr/bin/mihomo'
+            # nikki 包将 /usr/bin/mihomo 安装为指向 /usr/libexec/nikki 的符号链接。
+            # 解包到宿主机后该链接是悬空的（目标路径不在 chroot 外），
+            # cp 拒绝向悬空符号链接写入，必须先删除链接再写入真实二进制。
+            MIHOMO_BIN='${ROOTFS_DIR}/usr/bin/mihomo'
+            if [ -L \"\${MIHOMO_BIN}\" ]; then
+              # 读取链接目标，优先替换真实文件，再重建同名符号链接
+              LINK_TARGET=\$(readlink \"\${MIHOMO_BIN}\")
+              echo \"  检测到符号链接：\${MIHOMO_BIN} -> \${LINK_TARGET}\"
+              # 目标是绝对路径，拼接到 rootfs 内
+              REAL_BIN='${ROOTFS_DIR}'\"\${LINK_TARGET}\"
+              mkdir -p \"\$(dirname \"\${REAL_BIN}\")\"
+              rm -f \"\${MIHOMO_BIN}\"
+              cp '${MIHOMO_SRC}' \"\${REAL_BIN}\"
+              chmod +x \"\${REAL_BIN}\"
+              ln -s \"\${LINK_TARGET}\" \"\${MIHOMO_BIN}\"
+              echo \"  已替换真实二进制：\${REAL_BIN}\"
+              echo \"  已重建符号链接：\${MIHOMO_BIN} -> \${LINK_TARGET}\"
+            else
+              # 普通文件，直接覆盖
+              file \"\${MIHOMO_BIN}\" 2>/dev/null || echo '  (未找到，将新建)'
+              cp '${MIHOMO_SRC}' \"\${MIHOMO_BIN}\"
+              chmod +x \"\${MIHOMO_BIN}\"
+            fi
             echo '>>> 替换后 mihomo：'
             file '${ROOTFS_DIR}/usr/bin/mihomo'
+            file '${ROOTFS_DIR}/usr/libexec/nikki' 2>/dev/null || true
 
             echo '>>> 重打包 squashfs...'
             mksquashfs '${ROOTFS_DIR}' '${SQFS_BIN}' \
