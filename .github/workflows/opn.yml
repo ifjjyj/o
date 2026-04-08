@@ -166,7 +166,7 @@ jobs:
               luci-app-attendedsysupgrade luci-i18n-attendedsysupgrade-zh-cn \
               luci-i18n-base-zh-cn luci-i18n-firewall-zh-cn \
               luci-i18n-package-manager-zh-cn \
-              nikki luci-app-nikki luci-i18n-nikki-zh-cn" \
+              nikki luci-app-nikki luci-i18n-nikki-zh-cn -mihomo" \
             FILES="../files"
           echo "---"
           echo ">>> 构建完成，时间: $(date)"
