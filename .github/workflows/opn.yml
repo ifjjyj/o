@@ -1,4 +1,4 @@
-name: Build OpenWrt for Qihoo 360T7
+name: OpenWrt 360T7 nikki
 
 on:
   workflow_dispatch:
@@ -390,7 +390,7 @@ jobs:
         id: tag
         run: |
           DATE=$(date -u '+%Y%m%d')
-          TAG="v${OPENWRT_VERSION}-${DATE}-r${{ github.run_number }}"
+          TAG="${DATE}-r${{ github.run_number }}"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo ">>> Release tag: ${TAG}"
 
