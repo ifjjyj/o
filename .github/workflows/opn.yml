@@ -33,7 +33,7 @@ jobs:
           sudo apt-get install -y \
             build-essential libncurses-dev zlib1g-dev gawk \
             gettext libssl-dev xsltproc rsync wget unzip python3 \
-            qemu-utils u-boot-tools squashfs-tools
+            qemu-utils u-boot-tools squashfs-tools device-tree-compiler
           echo ">>> 依赖安装完成"
 
       - name: 💾 Cache ImageBuilder
@@ -159,7 +159,7 @@ jobs:
           echo "---"
           echo ">>> 构建完成，时间: $(date)"
 
-          # ✂️ 将原始长文件名重命名为短名
+          # 将原始长文件名重命名为短名
           OUTDIR="bin/targets/mediatek/filogic"
           ORIG_NAME="openwrt-${OPENWRT_VERSION}-mediatek-filogic-qihoo_360t7-squashfs-sysupgrade.itb"
           SHORT_NAME="openwrt-${OPENWRT_VERSION}-360t7-squashfs-sysupgrade.itb"
@@ -183,7 +183,7 @@ jobs:
           mkdir -p "${WORK}"
 
           # ── Step 1: 下载 mihomo ──────────────────────────────────────────
-          echo ">>> [1/6] 下载 mihomo ${MIHOMO_VERSION} (linux/arm64)..."
+          echo ">>> [1/5] 下载 mihomo ${MIHOMO_VERSION} (linux/arm64)..."
           wget -q \
             "https://github.com/MetaCubeX/mihomo/releases/download/v${MIHOMO_VERSION}/mihomo-linux-arm64-v${MIHOMO_VERSION}.gz" \
             -O "${WORK}/mihomo.gz"
@@ -192,20 +192,16 @@ jobs:
           file "${WORK}/mihomo"
 
           # ── Step 2: 分析 ITB 结构 ────────────────────────────────────────
-          echo ">>> [2/6] 分析 ITB 结构..."
+          echo ">>> [2/5] 分析 ITB 结构..."
           dumpimage -l "${FIRMWARE}"
 
           # ── Step 3: 逐个提取组件，定位 squashfs ──────────────────────────
-          echo ">>> [3/6] 提取 ITB 各组件..."
+          echo ">>> [3/5] 提取 ITB 各组件，定位 squashfs..."
           ROOTFS_IDX=-1
           idx=0
-          while true; do
-            BIN="${WORK}/part${idx}.bin"
-            if ! dumpimage -T flat_dt -p ${idx} -o "${BIN}" "${FIRMWARE}" 2>/dev/null; then
-              echo ">>> 共提取到 ${idx} 个组件"
-              break
-            fi
-            FTYPE=$(file "${BIN}")
+          while dumpimage -T flat_dt -p "${idx}" \
+                  -o "${WORK}/part${idx}.bin" "${FIRMWARE}" 2>/dev/null; do
+            FTYPE=$(file "${WORK}/part${idx}.bin")
             echo "  part${idx}: ${FTYPE##*: }"
             if echo "${FTYPE}" | grep -qi "squashfs"; then
               ROOTFS_IDX=${idx}
@@ -213,225 +209,129 @@ jobs:
             fi
             idx=$((idx + 1))
           done
+          echo ">>> 共提取到 ${idx} 个组件"
           [ "${ROOTFS_IDX}" -ge 0 ] || { echo "❌ 未找到 squashfs 组件"; exit 1; }
 
-          # ── Step 4: 解包，替换 mihomo，验证 ──────────────────────────────
-          echo ">>> [4/6] 解包 squashfs..."
+          # ── Step 4: 解包，替换 mihomo，重打包 squashfs ───────────────────
+          echo ">>> [4/5] 解包 squashfs..."
           unsquashfs -d "${WORK}/rootfs" "${WORK}/part${ROOTFS_IDX}.bin"
 
           echo ">>> 替换前 mihomo："
           file "${WORK}/rootfs/usr/bin/mihomo" 2>/dev/null || echo "  (未找到)"
-
           cp "${WORK}/mihomo" "${WORK}/rootfs/usr/bin/mihomo"
           chmod +x "${WORK}/rootfs/usr/bin/mihomo"
-
           echo ">>> 替换后 mihomo："
           file "${WORK}/rootfs/usr/bin/mihomo"
 
-          # ── Step 5: 检测压缩格式并重打包 squashfs ────────────────────────
-          echo ">>> [5/6] 重新打包 squashfs..."
+          echo ">>> 检测原始 squashfs 压缩格式..."
           SQFS_STAT=$(unsquashfs -s "${WORK}/part${ROOTFS_IDX}.bin")
           echo "${SQFS_STAT}"
-
           BLOCK_SIZE=$(echo "${SQFS_STAT}" | grep -i "block size" | grep -oP '\d+' | head -1)
           BLOCK_SIZE=${BLOCK_SIZE:-262144}
 
-          # 使用 bash 数组避免含空格字符串的 word-splitting 问题
           if echo "${SQFS_STAT}" | grep -qi "zstd"; then
-            SQCOMP=(-comp zstd)
+            COMP_ARGS="-comp zstd"
           else
-            SQCOMP=(-comp xz -Xbcj arm)
+            COMP_ARGS="-comp xz -Xbcj arm"
           fi
-          echo ">>> 压缩参数：${SQCOMP[*]}，块大小：${BLOCK_SIZE}"
-
+          echo ">>> 压缩参数：${COMP_ARGS}，块大小：${BLOCK_SIZE}"
+          # shellcheck disable=SC2086  # COMP_ARGS 需要分词展开为多个参数
           mksquashfs "${WORK}/rootfs" "${WORK}/part${ROOTFS_IDX}.bin" \
-            -noappend -b "${BLOCK_SIZE}" "${SQCOMP[@]}"
-
-          echo ">>> 各组件大小："
+            -noappend -b "${BLOCK_SIZE}" ${COMP_ARGS}
           ls -lh "${WORK}"/part*.bin
 
-          # ── Step 6: 解析 ITB 元数据，生成 .its，用 mkimage 重建 ITB ──────
-          echo ">>> [6/6] 重建 ITB..."
+          # ── Step 5: 用 fdtget 读取 ITB 元数据，shell 生成 .its，mkimage 重建 ITB ──
+          echo ">>> [5/5] 重建 ITB..."
+          ITS="${WORK}/image.its"
 
-          cat > "${WORK}/rebuild_itb.py" << 'PYEOF'
-#!/usr/bin/env python3
-"""
-解析原始 ITB 的 dumpimage 输出，动态生成 .its 文件，
-再用 mkimage 重建包含新 squashfs 的 ITB。
+          DESCRIPTION=$(fdtget "${FIRMWARE}" / description 2>/dev/null \
+                        || echo "OpenWrt for qihoo_360t7")
+          DEFAULT_CFG=$(fdtget "${FIRMWARE}" /configurations default 2>/dev/null || true)
+          IMAGE_NODES=$(fdtget -l "${FIRMWARE}" /images 2>/dev/null)
 
-修复：
-  - configurations 块不再错误地插入 hash@1 节点
-  - Loadables 多值正确生成逗号分隔的独立字符串
-  - its_type() 未知类型打印警告而非静默 fallback
-"""
-import subprocess, re, os, sys, shutil
+          {
+            printf '/dts-v1/;\n'
+            printf '\n'
+            printf '/ {\n'
+            printf '\tdescription = "%s";\n' "${DESCRIPTION}"
+            printf '\t#address-cells = <1>;\n'
+            printf '\n'
+            printf '\timages {\n'
 
-work     = sys.argv[1]   # 工作目录，含 part*.bin
-firmware = sys.argv[2]   # 原始固件路径（最终会被覆盖）
+            NODE_IDX=0
+            for NODE in ${IMAGE_NODES}; do
+              NODE_PATH="/images/${NODE}"
+              DESC=$(fdtget      "${FIRMWARE}" "${NODE_PATH}" description 2>/dev/null || echo "${NODE}")
+              TYPE=$(fdtget      "${FIRMWARE}" "${NODE_PATH}" type        2>/dev/null || echo "kernel")
+              ARCH=$(fdtget      "${FIRMWARE}" "${NODE_PATH}" arch        2>/dev/null || echo "arm64")
+              OS=$(fdtget        "${FIRMWARE}" "${NODE_PATH}" os          2>/dev/null || true)
+              LOAD=$(fdtget -t x "${FIRMWARE}" "${NODE_PATH}" load        2>/dev/null || true)
+              ENTRY=$(fdtget -t x "${FIRMWARE}" "${NODE_PATH}" entry      2>/dev/null || true)
 
-# ── 解析 dumpimage -l 输出 ─────────────────────────────────────────────────
-result = subprocess.run(
-    ['dumpimage', '-l', firmware],
-    capture_output=True, text=True, check=True
-)
-dump = result.stdout
-print("=== 原始 ITB 结构 ===")
-print(dump)
+              printf '\t\t%s {\n' "${NODE}"
+              printf '\t\t\tdescription = "%s";\n' "${DESC}"
+              printf '\t\t\tdata = /incbin/("%s/part%d.bin");\n' "${WORK}" "${NODE_IDX}"
+              printf '\t\t\ttype = "%s";\n' "${TYPE}"
+              printf '\t\t\tarch = "%s";\n' "${ARCH}"
+              [ -n "${OS}" ]    && printf '\t\t\tos = "linux";\n'
+              printf '\t\t\tcompression = "none";\n'
+              [ -n "${LOAD}" ]  && printf '\t\t\tload = <%s>;\n'  "${LOAD}"
+              [ -n "${ENTRY}" ] && printf '\t\t\tentry = <%s>;\n' "${ENTRY}"
+              printf '\t\t\thash@1 { algo = "crc32"; };\n'
+              printf '\t\t};\n'
 
-images, configs = [], []
-default_cfg, current = None, None
+              NODE_IDX=$((NODE_IDX + 1))
+            done
 
-for line in dump.split('\n'):
-    # 默认配置
-    m = re.search(r"Default Configuration: '([^']+)'", line)
-    if m:
-        default_cfg = m.group(1)
-        continue
+            printf '\t};\n'
+            printf '\n'
+            printf '\tconfigurations {\n'
+            [ -n "${DEFAULT_CFG}" ] && printf '\t\tdefault = "%s";\n' "${DEFAULT_CFG}"
 
-    # Image 条目
-    m = re.match(r'\s+Image (\d+) \(([^)]+)\)', line)
-    if m:
-        current = {'idx': int(m.group(1)), 'name': m.group(2), 'props': {}, 'is_cfg': False}
-        images.append(current)
-        continue
+            CFG_NODES=$(fdtget -l "${FIRMWARE}" /configurations 2>/dev/null)
+            for NODE in ${CFG_NODES}; do
+              # default 是属性不是子节点，fdtget -l 通常不返回它；此处做保险过滤
+              [ "${NODE}" = "default" ] && continue
+              NODE_PATH="/configurations/${NODE}"
+              DESC=$(fdtget    "${FIRMWARE}" "${NODE_PATH}" description 2>/dev/null || true)
+              KERN=$(fdtget    "${FIRMWARE}" "${NODE_PATH}" kernel      2>/dev/null || true)
+              FDT=$(fdtget     "${FIRMWARE}" "${NODE_PATH}" fdt         2>/dev/null || true)
+              RAMD=$(fdtget    "${FIRMWARE}" "${NODE_PATH}" ramdisk     2>/dev/null || true)
+              # loadables 是 stringlist，fdtget 返回换行分隔的多值
+              LOADS=$(fdtget -t s "${FIRMWARE}" "${NODE_PATH}" loadables 2>/dev/null || true)
 
-    # Configuration 条目
-    m = re.match(r'\s+Configuration (\d+) \(([^)]+)\)', line)
-    if m:
-        current = {'idx': int(m.group(1)), 'name': m.group(2), 'props': {}, 'is_cfg': True}
-        configs.append(current)
-        continue
+              printf '\t\t%s {\n' "${NODE}"
+              [ -n "${DESC}" ] && printf '\t\t\tdescription = "%s";\n' "${DESC}"
+              [ -n "${KERN}" ] && printf '\t\t\tkernel = "%s";\n'      "${KERN}"
+              [ -n "${FDT}" ]  && printf '\t\t\tfdt = "%s";\n'         "${FDT}"
+              [ -n "${RAMD}" ] && printf '\t\t\tramdisk = "%s";\n'     "${RAMD}"
+              if [ -n "${LOADS}" ]; then
+                # 将换行分隔的多值转为 "a", "b", "c" 格式
+                LOADS_FMT=""
+                while IFS= read -r item; do
+                  [ -z "${item}" ] && continue
+                  LOADS_FMT="${LOADS_FMT}\"${item}\", "
+                done <<< "${LOADS}"
+                LOADS_FMT="${LOADS_FMT%, }"
+                printf '\t\t\tloadables = %s;\n' "${LOADS_FMT}"
+              fi
+              printf '\t\t};\n'
+            done
 
-    if current is None:
-        continue
+            printf '\t};\n'
+            printf '};\n'
+          } > "${ITS}"
 
-    for key, pat in [
-        ('Description',  r'Description:\s+(.+)'),
-        ('Type',         r'Type:\s+(.+)'),
-        ('Architecture', r'Architecture:\s+(.+)'),
-        ('OS',           r'OS:\s+(.+)'),
-        ('Load Address', r'Load Address:\s+(0x[0-9a-fA-F]+)'),
-        ('Entry Point',  r'Entry Point:\s+(0x[0-9a-fA-F]+)'),
-        ('Kernel',       r'^\s+Kernel:\s+(.+)'),
-        ('FDT',          r'^\s+FDT:\s+(.+)'),
-        ('Loadables',    r'^\s+Loadables:\s+(.+)'),
-        ('Ramdisk',      r'^\s+Ramdisk:\s+(.+)'),
-    ]:
-        m2 = re.search(pat, line)
-        if m2:
-            current['props'][key] = m2.group(1).strip()
+          echo "=== 生成的 .its 文件 ==="
+          cat "${ITS}"
 
-# ── 类型转换辅助函数 ────────────────────────────────────────────────────────
-def its_type(t):
-    t = t.lower()
-    if 'kernel'       in t: return 'kernel'
-    if 'flat device'  in t: return 'flat_dt'
-    if 'ramdisk'      in t: return 'ramdisk'
-    if 'filesystem'   in t: return 'filesystem'
-    if 'script'       in t: return 'script'
-    if 'multi'        in t: return 'multi'
-    # 无法识别时打印警告，不静默 fallback
-    print(f'⚠️  未知 image type: "{t}"，fallback 为 "kernel"', file=sys.stderr)
-    return 'kernel'
+          NEW_ITB="${WORK}/new.itb"
+          mkimage -f "${ITS}" "${NEW_ITB}"
+          cp "${NEW_ITB}" "${FIRMWARE}"
+          ls -lh "${FIRMWARE}"
+          echo "✅ ITB 重建完成"
 
-def its_arch(a):
-    a = a.lower()
-    return 'arm64' if ('aarch64' in a or 'arm64' in a) else 'arm'
-
-def its_loadables(raw):
-    """将 'a, b, c' 或 'a b c' 格式转为 '"a", "b", "c"' 形式"""
-    # dumpimage 输出通常以逗号或空格分隔，统一处理
-    sep = ',' if ',' in raw else ' '
-    items = [s.strip() for s in raw.split(sep) if s.strip()]
-    return ', '.join(f'"{item}"' for item in items)
-
-# ── 生成 .its 文件 ──────────────────────────────────────────────────────────
-lines = [
-    '/dts-v1/;', '',
-    '/ {',
-    '\tdescription = "OpenWrt for qihoo_360t7";',
-    '\t#address-cells = <1>;', '',
-    '\timages {',
-]
-
-for img in images:
-    idx  = img['idx']
-    name = img['name']
-    p    = img['props']
-    t    = its_type(p.get('Type', 'kernel'))
-    arch = its_arch(p.get('Architecture', 'AArch64'))
-
-    lines += [
-        f'\t\t{name} {{',
-        f'\t\t\tdescription = "{p.get("Description", name)}";',
-        f'\t\t\tdata = /incbin/("{work}/part{idx}.bin");',
-        f'\t\t\ttype = "{t}";',
-        f'\t\t\tarch = "{arch}";',
-    ]
-    if 'OS' in p:
-        lines.append('\t\t\tos = "linux";')
-    lines.append('\t\t\tcompression = "none";')
-    if 'Load Address' in p:
-        lines.append(f'\t\t\tload = <{hex(int(p["Load Address"], 16))}>;')
-    if 'Entry Point' in p:
-        lines.append(f'\t\t\tentry = <{hex(int(p["Entry Point"], 16))}>;')
-    # hash 节点仅在 images 块内有效
-    lines += ['\t\t\thash@1 { algo = "crc32"; };', '\t\t};']
-
-lines += ['\t};', '', '\tconfigurations {']
-if default_cfg:
-    lines.append(f'\t\tdefault = "{default_cfg}";')
-
-for cfg in configs:
-    name = cfg['name']
-    p    = cfg['props']
-    lines.append(f'\t\t{name} {{')
-    if 'Description' in p:
-        lines.append(f'\t\t\tdescription = "{p["Description"]}";')
-    if 'Kernel'    in p:
-        lines.append(f'\t\t\tkernel = "{p["Kernel"]}";')
-    if 'FDT'       in p:
-        lines.append(f'\t\t\tfdt = "{p["FDT"]}";')
-    if 'Ramdisk'   in p:
-        lines.append(f'\t\t\tramdisk = "{p["Ramdisk"]}";')
-    if 'Loadables' in p:
-        # 修复：多值必须是逗号分隔的独立字符串，不能是单一字符串
-        lines.append(f'\t\t\tloadables = {its_loadables(p["Loadables"])};')
-    # configurations 块内不能有 hash 节点，已移除
-    lines.append('\t\t};')
-
-lines += ['\t};', '};', '']
-
-its_path = f'{work}/image.its'
-with open(its_path, 'w') as f:
-    f.write('\n'.join(lines))
-
-print("=== 生成的 .its 文件 ===")
-print(open(its_path).read())
-
-# ── 调用 mkimage 重建 ITB ───────────────────────────────────────────────────
-new_itb = f'{work}/new.itb'
-r = subprocess.run(
-    ['mkimage', '-f', its_path, new_itb],
-    capture_output=True, text=True
-)
-print(r.stdout)
-if r.stderr:
-    print(r.stderr, file=sys.stderr)
-if r.returncode != 0:
-    print('❌ mkimage 重建 ITB 失败', file=sys.stderr)
-    sys.exit(1)
-
-# 用新 ITB 覆盖原固件
-shutil.copy2(new_itb, firmware)
-size = os.path.getsize(firmware)
-print(f'✅ ITB 重建完成，已覆盖原固件：{firmware}')
-print(f'   文件大小：{size:,} bytes ({size/1024/1024:.2f} MiB)')
-PYEOF
-
-          python3 "${WORK}/rebuild_itb.py" "${WORK}" "${FIRMWARE}"
-
-          # 重建后更新 sha256sums
+          # 更新 sha256sums
           FILENAME="openwrt-${OPENWRT_VERSION}-360t7-squashfs-sysupgrade.itb"
           NEW_SHA=$(sha256sum "${FIRMWARE}" | awk '{print $1}')
           sed -i "s/^[0-9a-f]*  ${FILENAME}$/${NEW_SHA}  ${FILENAME}/" \
@@ -451,7 +351,7 @@ PYEOF
           echo ""
           cat "${OUTDIR}/sha256sums"
           echo ""
-          echo "✅ 固件构建成功：$(basename ${SYSUPGRADE})"
+          echo "✅ 固件构建成功：$(basename "${SYSUPGRADE}")"
 
       - name: 🏷️ Generate release tag
         id: tag
