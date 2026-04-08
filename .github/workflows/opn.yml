@@ -376,48 +376,7 @@ jobs:
           GH_SHA="${{ github.sha }}"
 
           cat > /tmp/release_notes.md << EOF
-## OpenWrt 固件 - Qihoo 360T7
-
-| 项目 | 值 |
-|------|-----|
-| OpenWrt 版本 | \`${OWT_VER}\` |
-| mihomo 版本 | \`${MH_VER}\` |
-| 构建时间 | ${BUILD_TIME} |
-| 固件大小 | ${FILESIZE} |
-| Commit | \`${GH_SHA}\` |
-
-### 内置组件
-
-- **nikki** (luci-app-nikki)，mihomo 内核已升级至 \`v${MH_VER}\`
-- **LuCI** 中文界面
-- dnsmasq-full / nftables / kmod-tun / kmod-nft-tproxy 等透明代理依赖
-
-### 二进制覆盖说明
-
-> nikki 自带 mihomo，本固件通过构建后解包 ITB、替换 squashfs 内核二进制的方式，
-> 将其升级为 \`v${MH_VER}\`。
-
-### SHA256 校验
-
-\`\`\`
-${SHA256}  ${FILENAME}
-\`\`\`
-
-### 刷写说明
-
-> ⚠️ 首次从其他固件切换请先备份配置
-
-**保留配置刷入：**
-\`\`\`
-sysupgrade -v /tmp/${FILENAME}
-\`\`\`
-
-**不保留配置（推荐首次刷入）：**
-\`\`\`
-sysupgrade -n /tmp/${FILENAME}
-\`\`\`
-EOF
-
+                 1
           echo "notes_file=/tmp/release_notes.md" >> "$GITHUB_OUTPUT"
 
       - name: 🚀 Create GitHub Release
