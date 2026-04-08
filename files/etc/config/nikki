@@ -8,7 +8,7 @@ config config 'config'
 	option cron_expression '0 3 * * *'
 	option test_profile '1'
 	option core_only '0'
-	option profile 'file:rt.yml'
+	option profile 'subscription:cfg180caa'
 
 config procd 'procd'
 	option fast_reload '0'
@@ -214,6 +214,6 @@ config subscription
 	option url 'https://gist.githubusercontent.com/ifjjyj/bb8c34c90a9fdc9f8dcd68c2d2fc5b57/raw/d416265153233838bb32d6947b5a5d716546075e/rt.txt'
 	option user_agent 'clash'
 	option prefer 'local'
-	option update '2026-04-05 15:00:05'
+	option update '2026-04-08 10:50:11'
 	option success '1'
 
