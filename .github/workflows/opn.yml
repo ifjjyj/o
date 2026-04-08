@@ -12,7 +12,7 @@ env:
   TARGET: "mediatek/filogic"
   PROFILE: "qihoo_360t7"
   ARCH: "aarch64_cortex-a53"
-  MIHOMO_VERSION: "1.19.22"
+  MIHOMO_VERSION: "1.19.23"
 
 permissions:
   contents: write
