@@ -2,13 +2,13 @@
 config status 'status'
 
 config config 'config'
-	option enabled '1'
+	option enabled '0'
 	option start_delay '0'
 	option scheduled_restart '0'
-	option cron_expression '0 3 * * *'
+	option scheduled_restart_cron '0 3 * * *'
 	option test_profile '1'
-	option core_only '0'
-	option profile 'subscription:cfg180caa'
+	option core_only '1'
+	option profile 'file:ru.yml'
 
 config procd 'procd'
 	option fast_reload '0'
@@ -208,12 +208,8 @@ config routing 'routing'
 config editor 'editor'
 
 config log 'log'
-
-config subscription
-	option name 'rt'
-	option url 'https://gist.githubusercontent.com/ifjjyj/bb8c34c90a9fdc9f8dcd68c2d2fc5b57/raw/d416265153233838bb32d6947b5a5d716546075e/rt.txt'
-	option user_agent 'clash'
-	option prefer 'local'
-	option update '2026-04-08 10:50:11'
-	option success '1'
+	option scheduled_clear '1'
+	option scheduled_clear_cron '*/5 * * * *'
+	option scheduled_clear_size_limit '1'
+	option scheduled_clear_size_limit_unit 'MB'
 
