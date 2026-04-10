@@ -256,7 +256,6 @@ jobs:
           BUILD_TIME=$(date -u '+%Y-%m-%d %H:%M UTC')
 
           cat > /tmp/release_notes.md << EOF
-          ## OpenWrt 固件 - Qihoo 360T7
 
           | 项目 | 值 |
           |------|-----|
