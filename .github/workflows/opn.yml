@@ -1,4 +1,4 @@
-name: OpenWrt 360T7 nikki
+name: 360T7 nikki
 
 on:
   workflow_dispatch:
