@@ -143,21 +143,6 @@ jobs:
           cat "${REPO_CONF}"
           echo ">>> momo feed 注册完成 ✅"
 
-      - name: 🔧 Inject mihomo ${{ env.MIHOMO_VERSION }} binary
-        run: |
-          set -euo pipefail
-          MIHOMO_GZ="mihomo-linux-arm64-v${MIHOMO_VERSION}.gz"
-          MIHOMO_URL="https://github.com/MetaCubeX/mihomo/releases/download/v${MIHOMO_VERSION}/${MIHOMO_GZ}"
-
-          echo ">>> 下载 mihomo ${MIHOMO_VERSION} (linux/arm64)..."
-          wget -q "${MIHOMO_URL}" -O mihomo.gz
-          gunzip -f mihomo.gz
-          mkdir -p files/usr/bin
-          cp mihomo files/usr/bin/mihomo
-          chmod +x files/usr/bin/mihomo
-          file files/usr/bin/mihomo
-          echo ">>> mihomo 注入完成 ✅"
-
       - name: 🔍 Verify profile exists
         run: |
           cd imagebuilder
