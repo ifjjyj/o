@@ -1,4 +1,4 @@
-name: Build OpenWrt for Qihoo 360T7
+name: Build 360T7
 
 on:
   workflow_dispatch:
