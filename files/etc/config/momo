@@ -1,11 +1,10 @@
 
 config config 'config'
-	option init '1'
-	option enabled '1'
-	option profile 'file:momo fake luci.json'
+	option enabled '0'
+	option profile 'file:momo fake.json'
 	option start_delay '0'
 	option scheduled_restart '0'
-	option cron_expression '0 3 * * *'
+	option scheduled_restart_cron '0 3 * * *'
 	option test_profile '1'
 	option core_only '1'
 
@@ -110,4 +109,12 @@ config routing 'routing'
 	option dummy_device 'momo-dummy'
 
 config placeholder 'placeholder'
+
+config log 'log'
+	option scheduled_clear '1'
+	option scheduled_clear_cron '*/5 * * * *'
+	option scheduled_clear_size_limit '1'
+	option scheduled_clear_size_limit_unit 'MB'
+
+config mixin 'mixin'
 
