@@ -1,0 +1,487 @@
+name: 360T7 opn
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/build-openwrt.yml'
+      - 'files/**'
+
+env:
+  OPENWRT_VERSION: "25.12.2"
+  TARGET: "mediatek/filogic"
+  PROFILE: "qihoo_360t7"
+  ARCH: "aarch64_cortex-a53"
+  MIHOMO_VERSION: "1.19.23"
+  SINGBOX_VERSION: "1.13.7"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4.2.2
+
+      - name: 🔧 Install dependencies
+        run: |
+          echo ">>> 安装构建依赖..."
+          sudo apt-get update -qq
+          sudo apt-get install -y \
+            build-essential libncurses-dev zlib1g-dev gawk \
+            gettext libssl-dev xsltproc rsync wget unzip python3 \
+            qemu-utils u-boot-tools squashfs-tools device-tree-compiler \
+            fakeroot
+          echo ">>> 依赖安装完成"
+
+      - name: 💾 Cache ImageBuilder
+        id: cache-imagebuilder
+        uses: actions/cache@v4
+        with:
+          path: imagebuilder
+          key: imagebuilder-${{ env.OPENWRT_VERSION }}-mediatek-filogic
+
+      - name: 📦 Download ImageBuilder (cache miss only)
+        if: steps.cache-imagebuilder.outputs.cache-hit != 'true'
+        run: |
+          BUILDER="openwrt-imagebuilder-${OPENWRT_VERSION}-mediatek-filogic.Linux-x86_64"
+          echo ">>> 缓存未命中，下载 ImageBuilder ${OPENWRT_VERSION}..."
+          wget --progress=bar:force \
+            "https://downloads.openwrt.org/releases/${OPENWRT_VERSION}/targets/${TARGET}/${BUILDER}.tar.zst"
+          echo ">>> 解压中..."
+          tar --zstd -xf "${BUILDER}.tar.zst"
+          mv "${BUILDER}" imagebuilder
+          echo ">>> ImageBuilder 准备完成"
+
+      - name: ✔️ Confirm ImageBuilder ready
+        run: |
+          if [ "${{ steps.cache-imagebuilder.outputs.cache-hit }}" = "true" ]; then
+            echo "✅ ImageBuilder 来自缓存（版本 ${OPENWRT_VERSION}）"
+          else
+            echo "✅ ImageBuilder 新鲜下载（版本 ${OPENWRT_VERSION}）"
+          fi
+
+      - name: 🔌 Setup nikki feed
+        run: |
+          set -euo pipefail
+
+          NIKKI_BASE="https://nikkinikki.pages.dev"
+          OPENWRT_BRANCH="openwrt-${OPENWRT_VERSION%.*}"
+          NIKKI_FEED_URL="${NIKKI_BASE}/${OPENWRT_BRANCH}/${ARCH}/nikki/packages.adb"
+
+          echo ">>> [1/2] 安装 nikki 签名公钥..."
+          APK_KEYS_DIR=$(find imagebuilder -path "*/apk/keys" -type d | head -1)
+          if [ -z "${APK_KEYS_DIR}" ]; then
+            APK_KEYS_DIR=$(find imagebuilder -name "keys" -type d | head -1)
+          fi
+          if [ -z "${APK_KEYS_DIR}" ]; then
+            echo "❌ 未找到任何 keys 目录"; exit 1
+          fi
+          echo ">>> keys 目录：${APK_KEYS_DIR}"
+          wget -q "${NIKKI_BASE}/public-key.pem" \
+               -O "${APK_KEYS_DIR}/nikki.pem" || {
+            echo "❌ nikki 公钥下载失败：${NIKKI_BASE}/public-key.pem"
+            exit 1
+          }
+          echo ">>> 公钥已安装 ✅"
+
+          echo ">>> [2/2] 注册 nikki feed..."
+          REPO_CONF=$(find imagebuilder -maxdepth 2 \
+                      -name "repositories.conf" | head -1)
+          if [ -z "${REPO_CONF}" ]; then
+            REPO_CONF=$(find imagebuilder -maxdepth 2 \
+                        -name "repositories*" | head -1)
+          fi
+          if [ -z "${REPO_CONF}" ]; then
+            echo "❌ 未找到 repositories 配置文件"; exit 1
+          fi
+          echo ">>> 配置文件：${REPO_CONF}"
+          echo ">>> feed URL：${NIKKI_FEED_URL}"
+          echo "${NIKKI_FEED_URL}" >> "${REPO_CONF}"
+          echo ">>> 注册后 repositories 内容："
+          cat "${REPO_CONF}"
+          echo ">>> nikki feed 注册完成 ✅"
+
+      - name: 🔍 Verify profile exists
+        run: |
+          cd imagebuilder
+          make info | grep -A3 "${PROFILE}" || {
+            echo "❌ Profile '${PROFILE}' 不存在"
+            make info
+            exit 1
+          }
+          echo ">>> Profile 确认存在 ✅"
+
+      - name: 🏗️ Build firmware
+        run: |
+          set -euo pipefail
+          cd imagebuilder
+
+          APK_REAL=$(find "$(pwd)" -name "apk" -type f -executable \
+                     ! -path "/tmp/*" | head -1)
+          if [ -z "${APK_REAL}" ]; then
+            echo "❌ 未找到 ImageBuilder 内置 apk 二进制"; exit 1
+          fi
+          echo ">>> 真实 apk 路径：${APK_REAL}"
+
+          mkdir -p /tmp/apk-wrapper
+          printf '#!/bin/sh\nexec "%s" --allow-untrusted "$@"\n' \
+            "${APK_REAL}" > /tmp/apk-wrapper/apk
+          chmod +x /tmp/apk-wrapper/apk
+          echo ">>> wrapper 内容："
+          cat /tmp/apk-wrapper/apk
+
+          export PATH="/tmp/apk-wrapper:${PATH}"
+          echo ">>> which apk：$(which apk)"
+
+          echo ">>> 开始构建固件，Profile: ${PROFILE}，时间: $(date)"
+          echo "---"
+          make image \
+            APK="/tmp/apk-wrapper/apk" \
+            PROFILE="${PROFILE}" \
+            PACKAGES="apk-mbedtls base-files ca-bundle dnsmasq-full dropbear \
+              firewall4 fitblk fstools kmod-crypto-hw-safexcel \
+              kmod-gpio-button-hotplug kmod-leds-gpio libc libgcc \
+              libustream-mbedtls logd mtd netifd nftables odhcp6c \
+              odhcpd-ipv6only ppp ppp-mod-pppoe procd-ujail uboot-envtools \
+              uci uclient-fetch urandom-seed urngd wpad-basic-mbedtls \
+              kmod-mt7915e kmod-mt7981-firmware mt7981-wo-firmware luci \
+              openssh-sftp-server zoneinfo-asia curl yq \
+              kmod-nft-offload kmod-nft-socket kmod-nft-tproxy kmod-tun \
+              kmod-inet-diag ip-full kmod-dummy kmod-tcp-bbr \
+              luci-app-attendedsysupgrade luci-i18n-attendedsysupgrade-zh-cn \
+              luci-i18n-base-zh-cn luci-i18n-firewall-zh-cn \
+              luci-i18n-package-manager-zh-cn \
+              nikki luci-app-nikki luci-i18n-nikki-zh-cn \
+              sing-box" \
+            FILES="../files"
+          echo "---"
+          echo ">>> 构建完成，时间: $(date)"
+
+          # 将原始长文件名重命名为短名
+          OUTDIR="bin/targets/mediatek/filogic"
+          ORIG_NAME="openwrt-${OPENWRT_VERSION}-mediatek-filogic-qihoo_360t7-squashfs-sysupgrade.itb"
+          SHORT_NAME="openwrt-${OPENWRT_VERSION}-360t7-squashfs-sysupgrade.itb"
+          if [ -f "${OUTDIR}/${ORIG_NAME}" ]; then
+            mv "${OUTDIR}/${ORIG_NAME}" "${OUTDIR}/${SHORT_NAME}"
+            echo ">>> 已重命名：${ORIG_NAME} → ${SHORT_NAME} ✅"
+            sed -i "s/${ORIG_NAME}/${SHORT_NAME}/g" "${OUTDIR}/sha256sums"
+            echo ">>> sha256sums 已同步更新 ✅"
+          else
+            echo "❌ 未找到原始固件文件：${ORIG_NAME}"
+            ls -lh "${OUTDIR}/"
+            exit 1
+          fi
+
+      - name: 🔧 Patch mihomo ${{ env.MIHOMO_VERSION }} and sing-box ${{ env.SINGBOX_VERSION }} into firmware
+        run: |
+          set -euo pipefail
+          OUTDIR="imagebuilder/bin/targets/mediatek/filogic"
+          FIRMWARE="${OUTDIR}/openwrt-${OPENWRT_VERSION}-360t7-squashfs-sysupgrade.itb"
+          WORK="/tmp/fw-patch"
+          mkdir -p "${WORK}"
+
+          # ── Step 1: 下载 mihomo ──────────────────────────────────────────
+          echo ">>> [1/6] 下载 mihomo ${MIHOMO_VERSION} (linux/arm64)..."
+          wget -q \
+            "https://github.com/MetaCubeX/mihomo/releases/download/v${MIHOMO_VERSION}/mihomo-linux-arm64-v${MIHOMO_VERSION}.gz" \
+            -O "${WORK}/mihomo.gz"
+          gunzip "${WORK}/mihomo.gz"
+          chmod +x "${WORK}/mihomo"
+          file "${WORK}/mihomo"
+
+          # ── Step 2: 下载 sing-box ────────────────────────────────────────
+          echo ">>> [2/6] 下载 sing-box ${SINGBOX_VERSION} (linux/arm64)..."
+          wget -q \
+            "https://github.com/SagerNet/sing-box/releases/download/v${SINGBOX_VERSION}/sing-box-${SINGBOX_VERSION}-linux-arm64.tar.gz" \
+            -O "${WORK}/sing-box.tar.gz"
+          tar -xzf "${WORK}/sing-box.tar.gz" -C "${WORK}" \
+            "sing-box-${SINGBOX_VERSION}-linux-arm64/sing-box"
+          mv "${WORK}/sing-box-${SINGBOX_VERSION}-linux-arm64/sing-box" \
+             "${WORK}/sing-box"
+          chmod +x "${WORK}/sing-box"
+          file "${WORK}/sing-box"
+
+          # ── Step 3: 分析 ITB 结构 ────────────────────────────────────────
+          echo ">>> [3/6] 分析 ITB 结构..."
+          dumpimage -l "${FIRMWARE}"
+
+          # ── Step 4: 逐个提取组件，定位 squashfs ──────────────────────────
+          echo ">>> [4/6] 提取 ITB 各组件，定位 squashfs..."
+          ROOTFS_IDX=-1
+          idx=0
+          while dumpimage -T flat_dt -p "${idx}" \
+                  -o "${WORK}/part${idx}.bin" "${FIRMWARE}" 2>/dev/null; do
+            FTYPE=$(file "${WORK}/part${idx}.bin")
+            echo "  part${idx}: ${FTYPE##*: }"
+            if echo "${FTYPE}" | grep -qi "squashfs"; then
+              ROOTFS_IDX=${idx}
+              echo "  → squashfs rootfs 在 index ${idx} ✅"
+            fi
+            idx=$((idx + 1))
+          done
+          echo ">>> 共提取到 ${idx} 个组件"
+          [ "${ROOTFS_IDX}" -ge 0 ] || { echo "❌ 未找到 squashfs 组件"; exit 1; }
+
+          # ── Step 5: 检测压缩参数（在 fakeroot 外提前完成）───────────────
+          echo ">>> [5/6] 检测原始 squashfs 压缩格式..."
+          SQFS_STAT=$(unsquashfs -s "${WORK}/part${ROOTFS_IDX}.bin")
+          echo "${SQFS_STAT}"
+          BLOCK_SIZE=$(echo "${SQFS_STAT}" | grep -i "block size" | grep -oP '\d+' | head -1)
+          BLOCK_SIZE=${BLOCK_SIZE:-262144}
+
+          if echo "${SQFS_STAT}" | grep -qi "zstd"; then
+            COMP_ARGS="-comp zstd"
+          else
+            COMP_ARGS="-comp xz -Xbcj arm"
+          fi
+          echo ">>> 压缩参数：${COMP_ARGS}，块大小：${BLOCK_SIZE}"
+
+          # ── Step 6: 解包 → 替换 mihomo + sing-box → 重打包（fakeroot）──
+          echo ">>> [6/6] 使用 fakeroot 解包、替换、重打包 squashfs..."
+          MIHOMO_SRC="${WORK}/mihomo"
+          SINGBOX_SRC="${WORK}/sing-box"
+          ROOTFS_DIR="${WORK}/rootfs"
+          SQFS_BIN="${WORK}/part${ROOTFS_IDX}.bin"
+
+          # ── 替换函数逻辑说明 ────────────────────────────────────────────
+          # nikki 包将 /usr/bin/mihomo 安装为指向 /usr/libexec/nikki 的符号链接，
+          # 解包到宿主机后该链接悬空，cp 拒绝写入，需先删链接再写真实二进制。
+          # sing-box 通常为普通文件 /usr/bin/sing-box，直接覆盖即可。
+          # shellcheck disable=SC2086  # COMP_ARGS 需要分词展开
+          fakeroot -- sh -c "
+            set -e
+
+            # ── 解包 squashfs ──────────────────────────────────────────────
+            echo '>>> 解包 squashfs...'
+            unsquashfs -d '${ROOTFS_DIR}' '${SQFS_BIN}'
+
+            # ── 替换 mihomo ────────────────────────────────────────────────
+            echo '>>> [A] 替换 mihomo...'
+            MIHOMO_BIN='${ROOTFS_DIR}/usr/bin/mihomo'
+            if [ -L \"\${MIHOMO_BIN}\" ]; then
+              LINK_TARGET=\$(readlink \"\${MIHOMO_BIN}\")
+              echo \"  检测到符号链接：\${MIHOMO_BIN} -> \${LINK_TARGET}\"
+              REAL_BIN='${ROOTFS_DIR}'\"\${LINK_TARGET}\"
+              mkdir -p \"\$(dirname \"\${REAL_BIN}\")\"
+              rm -f \"\${MIHOMO_BIN}\"
+              cp '${MIHOMO_SRC}' \"\${REAL_BIN}\"
+              chmod +x \"\${REAL_BIN}\"
+              ln -s \"\${LINK_TARGET}\" \"\${MIHOMO_BIN}\"
+              echo \"  已替换真实二进制：\${REAL_BIN}\"
+              echo \"  已重建符号链接：\${MIHOMO_BIN} -> \${LINK_TARGET}\"
+            else
+              file \"\${MIHOMO_BIN}\" 2>/dev/null || echo '  (未找到，将新建)'
+              cp '${MIHOMO_SRC}' \"\${MIHOMO_BIN}\"
+              chmod +x \"\${MIHOMO_BIN}\"
+            fi
+            echo '  替换后：'
+            file '${ROOTFS_DIR}/usr/bin/mihomo'
+            file '${ROOTFS_DIR}/usr/libexec/nikki' 2>/dev/null || true
+
+            # ── 替换 sing-box ──────────────────────────────────────────────
+            echo '>>> [B] 替换 sing-box...'
+            SINGBOX_BIN='${ROOTFS_DIR}/usr/bin/sing-box'
+            if [ ! -e \"\${SINGBOX_BIN}\" ] && [ ! -L \"\${SINGBOX_BIN}\" ]; then
+              echo '  ⚠️  /usr/bin/sing-box 不存在（包未正确安装），仍将写入二进制'
+              mkdir -p '${ROOTFS_DIR}/usr/bin'
+            fi
+            if [ -L \"\${SINGBOX_BIN}\" ]; then
+              # 与 mihomo 相同逻辑：符号链接 → 替换真实目标
+              LINK_TARGET=\$(readlink \"\${SINGBOX_BIN}\")
+              echo \"  检测到符号链接：\${SINGBOX_BIN} -> \${LINK_TARGET}\"
+              REAL_BIN='${ROOTFS_DIR}'\"\${LINK_TARGET}\"
+              mkdir -p \"\$(dirname \"\${REAL_BIN}\")\"
+              rm -f \"\${SINGBOX_BIN}\"
+              cp '${SINGBOX_SRC}' \"\${REAL_BIN}\"
+              chmod +x \"\${REAL_BIN}\"
+              ln -s \"\${LINK_TARGET}\" \"\${SINGBOX_BIN}\"
+              echo \"  已替换真实二进制：\${REAL_BIN}\"
+              echo \"  已重建符号链接：\${SINGBOX_BIN} -> \${LINK_TARGET}\"
+            else
+              # 普通文件（或不存在），直接覆盖 / 写入
+              cp '${SINGBOX_SRC}' \"\${SINGBOX_BIN}\"
+              chmod +x \"\${SINGBOX_BIN}\"
+              echo '  已替换（普通文件）'
+            fi
+            echo '  替换后：'
+            file '${ROOTFS_DIR}/usr/bin/sing-box'
+
+            # ── 重打包 squashfs ────────────────────────────────────────────
+            echo '>>> 重打包 squashfs...'
+            mksquashfs '${ROOTFS_DIR}' '${SQFS_BIN}' \
+              -noappend -b '${BLOCK_SIZE}' ${COMP_ARGS}
+          "
+          echo ">>> squashfs 替换完成 ✅"
+          ls -lh "${WORK}"/part*.bin
+
+          # ── 重建 ITB ─────────────────────────────────────────────────────
+          echo ">>> 重建 ITB..."
+          ITS="${WORK}/image.its"
+
+          DESCRIPTION=$(fdtget "${FIRMWARE}" / description 2>/dev/null \
+                        || echo "OpenWrt for qihoo_360t7")
+          DEFAULT_CFG=$(fdtget "${FIRMWARE}" /configurations default 2>/dev/null || true)
+          IMAGE_NODES=$(fdtget -l "${FIRMWARE}" /images 2>/dev/null)
+
+          {
+            printf '/dts-v1/;\n'
+            printf '\n'
+            printf '/ {\n'
+            printf '\tdescription = "%s";\n' "${DESCRIPTION}"
+            printf '\t#address-cells = <1>;\n'
+            printf '\n'
+            printf '\timages {\n'
+
+            NODE_IDX=0
+            for NODE in ${IMAGE_NODES}; do
+              NODE_PATH="/images/${NODE}"
+              DESC=$(fdtget      "${FIRMWARE}" "${NODE_PATH}" description 2>/dev/null || echo "${NODE}")
+              TYPE=$(fdtget      "${FIRMWARE}" "${NODE_PATH}" type        2>/dev/null || echo "kernel")
+              ARCH_VAL=$(fdtget  "${FIRMWARE}" "${NODE_PATH}" arch        2>/dev/null || echo "arm64")
+              OS=$(fdtget        "${FIRMWARE}" "${NODE_PATH}" os          2>/dev/null || true)
+              LOAD=$(fdtget -t x "${FIRMWARE}" "${NODE_PATH}" load        2>/dev/null || true)
+              ENTRY=$(fdtget -t x "${FIRMWARE}" "${NODE_PATH}" entry      2>/dev/null || true)
+
+              printf '\t\t%s {\n' "${NODE}"
+              printf '\t\t\tdescription = "%s";\n' "${DESC}"
+              printf '\t\t\tdata = /incbin/("%s/part%d.bin");\n' "${WORK}" "${NODE_IDX}"
+              printf '\t\t\ttype = "%s";\n' "${TYPE}"
+              printf '\t\t\tarch = "%s";\n' "${ARCH_VAL}"
+              [ -n "${OS}" ]    && printf '\t\t\tos = "linux";\n'
+              printf '\t\t\tcompression = "none";\n'
+              [ -n "${LOAD}" ]  && printf '\t\t\tload = <%s>;\n'  "${LOAD}"
+              [ -n "${ENTRY}" ] && printf '\t\t\tentry = <%s>;\n' "${ENTRY}"
+              printf '\t\t\thash@1 { algo = "crc32"; };\n'
+              printf '\t\t};\n'
+
+              NODE_IDX=$((NODE_IDX + 1))
+            done
+
+            printf '\t};\n'
+            printf '\n'
+            printf '\tconfigurations {\n'
+            [ -n "${DEFAULT_CFG}" ] && printf '\t\tdefault = "%s";\n' "${DEFAULT_CFG}"
+
+            CFG_NODES=$(fdtget -l "${FIRMWARE}" /configurations 2>/dev/null)
+            for NODE in ${CFG_NODES}; do
+              [ "${NODE}" = "default" ] && continue
+              NODE_PATH="/configurations/${NODE}"
+              DESC=$(fdtget    "${FIRMWARE}" "${NODE_PATH}" description 2>/dev/null || true)
+              KERN=$(fdtget    "${FIRMWARE}" "${NODE_PATH}" kernel      2>/dev/null || true)
+              FDT=$(fdtget     "${FIRMWARE}" "${NODE_PATH}" fdt         2>/dev/null || true)
+              RAMD=$(fdtget    "${FIRMWARE}" "${NODE_PATH}" ramdisk     2>/dev/null || true)
+              LOADS=$(fdtget -t s "${FIRMWARE}" "${NODE_PATH}" loadables 2>/dev/null || true)
+
+              printf '\t\t%s {\n' "${NODE}"
+              [ -n "${DESC}" ] && printf '\t\t\tdescription = "%s";\n' "${DESC}"
+              [ -n "${KERN}" ] && printf '\t\t\tkernel = "%s";\n'      "${KERN}"
+              [ -n "${FDT}" ]  && printf '\t\t\tfdt = "%s";\n'         "${FDT}"
+              [ -n "${RAMD}" ] && printf '\t\t\tramdisk = "%s";\n'     "${RAMD}"
+              if [ -n "${LOADS}" ]; then
+                LOADS_FMT=""
+                while IFS= read -r item; do
+                  [ -z "${item}" ] && continue
+                  LOADS_FMT="${LOADS_FMT}\"${item}\", "
+                done <<< "${LOADS}"
+                LOADS_FMT="${LOADS_FMT%, }"
+                printf '\t\t\tloadables = %s;\n' "${LOADS_FMT}"
+              fi
+              printf '\t\t};\n'
+            done
+
+            printf '\t};\n'
+            printf '};\n'
+          } > "${ITS}"
+
+          echo "=== 生成的 .its 文件 ==="
+          cat "${ITS}"
+
+          NEW_ITB="${WORK}/new.itb"
+          mkimage -f "${ITS}" "${NEW_ITB}"
+          cp "${NEW_ITB}" "${FIRMWARE}"
+          ls -lh "${FIRMWARE}"
+          echo "✅ ITB 重建完成"
+
+          # ── 更新 sha256sums ───────────────────────────────────────────────
+          FILENAME="openwrt-${OPENWRT_VERSION}-360t7-squashfs-sysupgrade.itb"
+          NEW_SHA=$(sha256sum "${FIRMWARE}" | awk '{print $1}')
+          sed -i "s/^[0-9a-f]*  ${FILENAME}$/${NEW_SHA}  ${FILENAME}/" \
+            "${OUTDIR}/sha256sums"
+          echo ">>> sha256sums 已更新 ✅"
+          echo ">>> mihomo ${MIHOMO_VERSION} 替换完成 ✅"
+          echo ">>> sing-box ${SINGBOX_VERSION} 替换完成 ✅"
+
+      - name: ✅ Verify output
+        run: |
+          cd imagebuilder
+          OUTDIR="bin/targets/mediatek/filogic"
+          SYSUPGRADE=$(ls "${OUTDIR}"/*sysupgrade* 2>/dev/null | head -1)
+          if [ -z "${SYSUPGRADE}" ]; then
+            echo "❌ 未找到 sysupgrade 固件"; exit 1
+          fi
+          ls -lh "${OUTDIR}/"
+          echo ""
+          cat "${OUTDIR}/sha256sums"
+          echo ""
+          echo "✅ 固件构建成功：$(basename "${SYSUPGRADE}")"
+
+      - name: 🏷️ Generate release tag
+        id: tag
+        run: |
+          DATE=$(date -u '+%Y%m%d')
+          TAG="${DATE}-r${{ github.run_number }}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo ">>> Release tag: ${TAG}"
+
+      - name: 📝 Generate release notes
+        id: notes
+        run: |
+          cd imagebuilder
+          OUTDIR="bin/targets/mediatek/filogic"
+          FILENAME="openwrt-${OPENWRT_VERSION}-360t7-squashfs-sysupgrade.itb"
+          FIRMWARE="${OUTDIR}/${FILENAME}"
+          SHA256=$(grep "${FILENAME}" "${OUTDIR}/sha256sums" | awk '{print $1}')
+          FILESIZE=$(ls -lh "${FIRMWARE}" | awk '{print $5}')
+          BUILD_TIME=$(date -u '+%Y-%m-%d %H:%M UTC')
+          OWT_VER="${OPENWRT_VERSION}"
+          MH_VER="${MIHOMO_VERSION}"
+          SB_VER="${SINGBOX_VERSION}"
+          GH_SHA="${{ github.sha }}"
+
+          cat > /tmp/release_notes.md << EOF
+          ## OpenWrt ${OWT_VER} for Qihoo 360T7
+
+          **构建时间**：${BUILD_TIME}
+          **Commit**：\`${GH_SHA}\`
+
+          ### 固件信息
+          | 项目 | 值 |
+          |------|-----|
+          | OpenWrt 版本 | ${OWT_VER} |
+          | mihomo 版本 | ${MH_VER} |
+          | sing-box 版本 | ${SB_VER} |
+          | 文件大小 | ${FILESIZE} |
+          | SHA256 | \`${SHA256}\` |
+
+          ### 刷机说明
+          下载 \`${FILENAME}\` 后通过 LuCI 或 \`sysupgrade\` 命令刷入。
+          EOF
+          echo "notes_file=/tmp/release_notes.md" >> "$GITHUB_OUTPUT"
+
+      - name: 🚀 Create GitHub Release
+        uses: softprops/action-gh-release@v2.3.2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: "OpenWrt ${{ env.OPENWRT_VERSION }} for 360T7 · ${{ steps.tag.outputs.tag }}"
+          body_path: ${{ steps.notes.outputs.notes_file }}
+          draft: false
+          prerelease: false
+          files: |
+            imagebuilder/bin/targets/mediatek/filogic/openwrt-${{ env.OPENWRT_VERSION }}-360t7-squashfs-sysupgrade.itb
+            imagebuilder/bin/targets/mediatek/filogic/sha256sums
+          fail_on_unmatched_files: true
