@@ -206,17 +206,29 @@ jobs:
           chmod +x "${WORK}/sing-box"
           file "${WORK}/sing-box"
 
-          # ── Step 3: 定位 fwtool，提取原始 metadata ───────────────────────
-          # fwtool 由 ImageBuilder 自带，用于在 ITB 末尾附加/读取设备兼容性元数据。
-          # 重建 ITB 后必须将 metadata 重新注入，否则 sysupgrade 报
-          # "Image metadata not present" 并拒绝刷入。
-          echo ">>> [3/7] 提取原始固件 metadata..."
-          FWTOOL=$(find imagebuilder -name "fwtool" -type f -executable \
-                   ! -path "/tmp/*" | head -1)
+          # ── Step 3: 定位 host 架构 fwtool，提取原始 metadata ────────────
+          # 必须使用 staging_dir/host 下的 x86_64 版本。
+          # build_dir/target-* 和 root.*/* 下的同名文件是 ARM64 目标架构二进制，
+          # 在 x86_64 Runner 上执行会报 "Exec format error"。
+          echo ">>> [3/7] 定位 host fwtool 并提取原始固件 metadata..."
+          FWTOOL=$(find imagebuilder/staging_dir/host -name "fwtool" \
+                   -type f -executable 2>/dev/null | head -1)
           if [ -z "${FWTOOL}" ]; then
-            echo "❌ 未在 ImageBuilder 中找到 fwtool"; exit 1
+            echo "⚠️  staging_dir/host 未找到 fwtool，尝试全局搜索（排除 target 目录）..."
+            FWTOOL=$(find imagebuilder -name "fwtool" -type f -executable \
+                     ! -path "*/build_dir/*" \
+                     ! -path "*/target-*/*" \
+                     ! -path "*/root.*/*" 2>/dev/null | head -1)
+          fi
+          if [ -z "${FWTOOL}" ]; then
+            echo "❌ 未找到可执行的 host fwtool"; exit 1
           fi
           echo ">>> fwtool 路径：${FWTOOL}"
+          file "${FWTOOL}"
+          if file "${FWTOOL}" | grep -qi "aarch64\|arm"; then
+            echo "❌ 找到的 fwtool 是 ARM 架构，无法在 Runner 执行"; exit 1
+          fi
+
           METADATA_JSON="${WORK}/metadata.json"
           "${FWTOOL}" -i "${METADATA_JSON}" "${FIRMWARE}" && \
             echo ">>> metadata 提取完成 ✅" || {
