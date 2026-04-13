@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - '.github/workflows/opns.yml'
+      - '.github/workflows/build-openwrt.yml'
       - 'files/**'
 
 env:
@@ -186,7 +186,7 @@ jobs:
           mkdir -p "${WORK}"
 
           # ── Step 1: 下载 mihomo ──────────────────────────────────────────
-          echo ">>> [1/6] 下载 mihomo ${MIHOMO_VERSION} (linux/arm64)..."
+          echo ">>> [1/7] 下载 mihomo ${MIHOMO_VERSION} (linux/arm64)..."
           wget -q \
             "https://github.com/MetaCubeX/mihomo/releases/download/v${MIHOMO_VERSION}/mihomo-linux-arm64-v${MIHOMO_VERSION}.gz" \
             -O "${WORK}/mihomo.gz"
@@ -195,7 +195,7 @@ jobs:
           file "${WORK}/mihomo"
 
           # ── Step 2: 下载 sing-box ────────────────────────────────────────
-          echo ">>> [2/6] 下载 sing-box ${SINGBOX_VERSION} (linux/arm64)..."
+          echo ">>> [2/7] 下载 sing-box ${SINGBOX_VERSION} (linux/arm64)..."
           wget -q \
             "https://github.com/SagerNet/sing-box/releases/download/v${SINGBOX_VERSION}/sing-box-${SINGBOX_VERSION}-linux-arm64.tar.gz" \
             -O "${WORK}/sing-box.tar.gz"
@@ -206,12 +206,31 @@ jobs:
           chmod +x "${WORK}/sing-box"
           file "${WORK}/sing-box"
 
-          # ── Step 3: 分析 ITB 结构 ────────────────────────────────────────
-          echo ">>> [3/6] 分析 ITB 结构..."
+          # ── Step 3: 定位 fwtool，提取原始 metadata ───────────────────────
+          # fwtool 由 ImageBuilder 自带，用于在 ITB 末尾附加/读取设备兼容性元数据。
+          # 重建 ITB 后必须将 metadata 重新注入，否则 sysupgrade 报
+          # "Image metadata not present" 并拒绝刷入。
+          echo ">>> [3/7] 提取原始固件 metadata..."
+          FWTOOL=$(find imagebuilder -name "fwtool" -type f -executable \
+                   ! -path "/tmp/*" | head -1)
+          if [ -z "${FWTOOL}" ]; then
+            echo "❌ 未在 ImageBuilder 中找到 fwtool"; exit 1
+          fi
+          echo ">>> fwtool 路径：${FWTOOL}"
+          METADATA_JSON="${WORK}/metadata.json"
+          "${FWTOOL}" -i "${METADATA_JSON}" "${FIRMWARE}" && \
+            echo ">>> metadata 提取完成 ✅" || {
+            echo "❌ metadata 提取失败"; exit 1
+          }
+          echo ">>> metadata 内容预览："
+          cat "${METADATA_JSON}"
+
+          # ── Step 4: 分析 ITB 结构 ────────────────────────────────────────
+          echo ">>> [4/7] 分析 ITB 结构..."
           dumpimage -l "${FIRMWARE}"
 
-          # ── Step 4: 逐个提取组件，定位 squashfs ──────────────────────────
-          echo ">>> [4/6] 提取 ITB 各组件，定位 squashfs..."
+          # ── Step 5: 逐个提取组件，定位 squashfs ──────────────────────────
+          echo ">>> [5/7] 提取 ITB 各组件，定位 squashfs..."
           ROOTFS_IDX=-1
           idx=0
           while dumpimage -T flat_dt -p "${idx}" \
@@ -227,8 +246,8 @@ jobs:
           echo ">>> 共提取到 ${idx} 个组件"
           [ "${ROOTFS_IDX}" -ge 0 ] || { echo "❌ 未找到 squashfs 组件"; exit 1; }
 
-          # ── Step 5: 检测压缩参数（在 fakeroot 外提前完成）───────────────
-          echo ">>> [5/6] 检测原始 squashfs 压缩格式..."
+          # ── Step 6: 检测压缩参数，解包替换重打包（fakeroot）────────────
+          echo ">>> [6/7] 检测原始 squashfs 压缩格式..."
           SQFS_STAT=$(unsquashfs -s "${WORK}/part${ROOTFS_IDX}.bin")
           echo "${SQFS_STAT}"
           BLOCK_SIZE=$(echo "${SQFS_STAT}" | grep -i "block size" | grep -oP '\d+' | head -1)
@@ -241,26 +260,19 @@ jobs:
           fi
           echo ">>> 压缩参数：${COMP_ARGS}，块大小：${BLOCK_SIZE}"
 
-          # ── Step 6: 解包 → 替换 mihomo + sing-box → 重打包（fakeroot）──
-          echo ">>> [6/6] 使用 fakeroot 解包、替换、重打包 squashfs..."
           MIHOMO_SRC="${WORK}/mihomo"
           SINGBOX_SRC="${WORK}/sing-box"
           ROOTFS_DIR="${WORK}/rootfs"
           SQFS_BIN="${WORK}/part${ROOTFS_IDX}.bin"
 
-          # ── 替换函数逻辑说明 ────────────────────────────────────────────
-          # nikki 包将 /usr/bin/mihomo 安装为指向 /usr/libexec/nikki 的符号链接，
-          # 解包到宿主机后该链接悬空，cp 拒绝写入，需先删链接再写真实二进制。
-          # sing-box 通常为普通文件 /usr/bin/sing-box，直接覆盖即可。
           # shellcheck disable=SC2086  # COMP_ARGS 需要分词展开
           fakeroot -- sh -c "
             set -e
 
-            # ── 解包 squashfs ──────────────────────────────────────────────
             echo '>>> 解包 squashfs...'
             unsquashfs -d '${ROOTFS_DIR}' '${SQFS_BIN}'
 
-            # ── 替换 mihomo ────────────────────────────────────────────────
+            # ── 替换 mihomo ──────────────────────────────────────────────
             echo '>>> [A] 替换 mihomo...'
             MIHOMO_BIN='${ROOTFS_DIR}/usr/bin/mihomo'
             if [ -L \"\${MIHOMO_BIN}\" ]; then
@@ -278,20 +290,20 @@ jobs:
               file \"\${MIHOMO_BIN}\" 2>/dev/null || echo '  (未找到，将新建)'
               cp '${MIHOMO_SRC}' \"\${MIHOMO_BIN}\"
               chmod +x \"\${MIHOMO_BIN}\"
+              echo '  已替换（普通文件）'
             fi
             echo '  替换后：'
             file '${ROOTFS_DIR}/usr/bin/mihomo'
             file '${ROOTFS_DIR}/usr/libexec/nikki' 2>/dev/null || true
 
-            # ── 替换 sing-box ──────────────────────────────────────────────
+            # ── 替换 sing-box ────────────────────────────────────────────
             echo '>>> [B] 替换 sing-box...'
             SINGBOX_BIN='${ROOTFS_DIR}/usr/bin/sing-box'
             if [ ! -e \"\${SINGBOX_BIN}\" ] && [ ! -L \"\${SINGBOX_BIN}\" ]; then
-              echo '  ⚠️  /usr/bin/sing-box 不存在（包未正确安装），仍将写入二进制'
+              echo '  ⚠️  /usr/bin/sing-box 不存在，将直接写入'
               mkdir -p '${ROOTFS_DIR}/usr/bin'
             fi
             if [ -L \"\${SINGBOX_BIN}\" ]; then
-              # 与 mihomo 相同逻辑：符号链接 → 替换真实目标
               LINK_TARGET=\$(readlink \"\${SINGBOX_BIN}\")
               echo \"  检测到符号链接：\${SINGBOX_BIN} -> \${LINK_TARGET}\"
               REAL_BIN='${ROOTFS_DIR}'\"\${LINK_TARGET}\"
@@ -303,7 +315,6 @@ jobs:
               echo \"  已替换真实二进制：\${REAL_BIN}\"
               echo \"  已重建符号链接：\${SINGBOX_BIN} -> \${LINK_TARGET}\"
             else
-              # 普通文件（或不存在），直接覆盖 / 写入
               cp '${SINGBOX_SRC}' \"\${SINGBOX_BIN}\"
               chmod +x \"\${SINGBOX_BIN}\"
               echo '  已替换（普通文件）'
@@ -311,7 +322,6 @@ jobs:
             echo '  替换后：'
             file '${ROOTFS_DIR}/usr/bin/sing-box'
 
-            # ── 重打包 squashfs ────────────────────────────────────────────
             echo '>>> 重打包 squashfs...'
             mksquashfs '${ROOTFS_DIR}' '${SQFS_BIN}' \
               -noappend -b '${BLOCK_SIZE}' ${COMP_ARGS}
@@ -319,8 +329,8 @@ jobs:
           echo ">>> squashfs 替换完成 ✅"
           ls -lh "${WORK}"/part*.bin
 
-          # ── 重建 ITB ─────────────────────────────────────────────────────
-          echo ">>> 重建 ITB..."
+          # ── Step 7: 重建 ITB + 重新注入 metadata ────────────────────────
+          echo ">>> [7/7] 重建 ITB..."
           ITS="${WORK}/image.its"
 
           DESCRIPTION=$(fdtget "${FIRMWARE}" / description 2>/dev/null \
@@ -371,11 +381,11 @@ jobs:
             for NODE in ${CFG_NODES}; do
               [ "${NODE}" = "default" ] && continue
               NODE_PATH="/configurations/${NODE}"
-              DESC=$(fdtget    "${FIRMWARE}" "${NODE_PATH}" description 2>/dev/null || true)
-              KERN=$(fdtget    "${FIRMWARE}" "${NODE_PATH}" kernel      2>/dev/null || true)
-              FDT=$(fdtget     "${FIRMWARE}" "${NODE_PATH}" fdt         2>/dev/null || true)
-              RAMD=$(fdtget    "${FIRMWARE}" "${NODE_PATH}" ramdisk     2>/dev/null || true)
-              LOADS=$(fdtget -t s "${FIRMWARE}" "${NODE_PATH}" loadables 2>/dev/null || true)
+              DESC=$(fdtget      "${FIRMWARE}" "${NODE_PATH}" description 2>/dev/null || true)
+              KERN=$(fdtget      "${FIRMWARE}" "${NODE_PATH}" kernel      2>/dev/null || true)
+              FDT=$(fdtget       "${FIRMWARE}" "${NODE_PATH}" fdt         2>/dev/null || true)
+              RAMD=$(fdtget      "${FIRMWARE}" "${NODE_PATH}" ramdisk     2>/dev/null || true)
+              LOADS=$(fdtget -t s "${FIRMWARE}" "${NODE_PATH}" loadables  2>/dev/null || true)
 
               printf '\t\t%s {\n' "${NODE}"
               [ -n "${DESC}" ] && printf '\t\t\tdescription = "%s";\n' "${DESC}"
@@ -403,9 +413,19 @@ jobs:
 
           NEW_ITB="${WORK}/new.itb"
           mkimage -f "${ITS}" "${NEW_ITB}"
+
+          # 关键：重新注入 metadata trailer
+          # sysupgrade 依赖此数据做设备兼容性校验，丢失则报
+          # "Image metadata not present" 并拒绝刷入
+          echo ">>> 重新注入 metadata..."
+          "${FWTOOL}" -I "${METADATA_JSON}" "${NEW_ITB}" && \
+            echo ">>> metadata 注入完成 ✅" || {
+            echo "❌ metadata 注入失败"; exit 1
+          }
+
           cp "${NEW_ITB}" "${FIRMWARE}"
           ls -lh "${FIRMWARE}"
-          echo "✅ ITB 重建完成"
+          echo "✅ ITB 重建完成（含 metadata）"
 
           # ── 更新 sha256sums ───────────────────────────────────────────────
           FILENAME="openwrt-${OPENWRT_VERSION}-360t7-squashfs-sysupgrade.itb"
