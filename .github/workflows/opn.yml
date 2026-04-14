@@ -202,9 +202,6 @@ jobs:
           cat > /tmp/release_notes.md << EOF
           ## OpenWrt ${OWT_VER} for Qihoo 360T7
 
-          **构建时间**：${BUILD_TIME}
-          **Commit**：\`${GH_SHA}\`
-
           ### 固件信息
           | 项目 | 值 |
           |------|-----|
@@ -213,8 +210,6 @@ jobs:
           | 文件大小 | ${FILESIZE} |
           | SHA256 | \`${SHA256}\` |
 
-          ### 刷机说明
-          下载 \`${FILENAME}\` 后通过 LuCI 或 \`sysupgrade\` 命令刷入。
           EOF
           echo "notes_file=/tmp/release_notes.md" >> "$GITHUB_OUTPUT"
 
