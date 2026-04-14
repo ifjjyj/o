@@ -19,6 +19,7 @@ jobs:
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4.2.2
+
       - name: 🔧 Install dependencies
         run: |
           sudo apt-get update -qq
@@ -27,12 +28,14 @@ jobs:
             gettext libssl-dev xsltproc rsync wget unzip python3 \
             qemu-utils u-boot-tools squashfs-tools device-tree-compiler \
             fakeroot
+
       - name: 💾 Cache ImageBuilder
         id: cache-imagebuilder
         uses: actions/cache@v4
         with:
           path: imagebuilder
           key: imagebuilder-${{ env.OPENWRT_VERSION }}-mediatek-filogic
+
       - name: 📦 Download ImageBuilder (cache miss only)
         if: steps.cache-imagebuilder.outputs.cache-hit != 'true'
         run: |
@@ -41,6 +44,7 @@ jobs:
             "https://downloads.openwrt.org/releases/${OPENWRT_VERSION}/targets/${TARGET}/${BUILDER}.tar.zst"
           tar --zstd -xf "${BUILDER}.tar.zst"
           mv "${BUILDER}" imagebuilder
+
       - name: ✔️ Confirm ImageBuilder ready
         run: |
           if [ "${{ steps.cache-imagebuilder.outputs.cache-hit }}" = "true" ]; then
@@ -59,7 +63,7 @@ jobs:
           [ -z "${APK_KEYS_DIR}" ] && APK_KEYS_DIR=$(find imagebuilder -name "keys" -type d | head -1)
           [ -z "${APK_KEYS_DIR}" ] && { echo "❌ 未找到 keys 目录"; exit 1; }
           wget -q "${NIKKI_BASE}/public-key.pem" -O "${APK_KEYS_DIR}/nikki.pem" || {
-            echo "❌ nikki 公钥下载失败"; exit 1}
+            echo "❌ nikki 公钥下载失败"; exit 1; }
           REPO_CONF=$(find imagebuilder -maxdepth 2 -name "repositories.conf" | head -1)
           [ -z "${REPO_CONF}" ] && REPO_CONF=$(find imagebuilder -maxdepth 2 -name "repositories*" | head -1)
           [ -z "${REPO_CONF}" ] && { echo "❌ 未找到 repositories 配置文件"; exit 1; }
@@ -102,13 +106,15 @@ jobs:
           echo ">>> 注册后 repositories 内容："
           cat "${REPO_CONF}"
           echo ">>> momo feed 注册完成 ✅"
-	   - name: 🔍 Verify profile exists
+
+      - name: 🔍 Verify profile exists
         run: |
           cd imagebuilder
           make info | grep -A3 "${PROFILE}" || {
             echo "❌ Profile '${PROFILE}' 不存在"
             make info
-            exit 1 }
+            exit 1; }
+
       - name: 🏷️ Generate release tag
         id: tag
         run: |
@@ -159,6 +165,7 @@ jobs:
             ls -lh "${OUTDIR}/"
             exit 1
           fi
+
       - name: ✅ Verify output
         run: |
           cd imagebuilder
@@ -168,12 +175,12 @@ jobs:
           ls -lh "${OUTDIR}/"
           cat "${OUTDIR}/sha256sums"
           echo "✅ 固件构建成功：$(basename "${SYSUPGRADE}")"
+
       - name: 📝 Generate release notes
         id: notes
         run: |
           cd imagebuilder
           OUTDIR="bin/targets/mediatek/filogic"
-          # ★ 统一引用同一个 filename
           FILENAME="${{ steps.tag.outputs.filename }}"
           FIRMWARE="${OUTDIR}/${FILENAME}"
           SHA256=$(grep "${FILENAME}" "${OUTDIR}/sha256sums" | awk '{print $1}')
@@ -184,12 +191,12 @@ jobs:
           | 项目 | 值 |
           |------|-----|
           | OpenWrt 版本 | ${OPENWRT_VERSION} |
-          | mihomo 版本 | ${MIHOMO_VERSION} |
           | 构建时间 | ${BUILD_TIME} |
           | 文件大小 | ${FILESIZE} |
           | SHA256 | \`${SHA256}\` |
           EOF
           echo "notes_file=/tmp/release_notes.md" >> "$GITHUB_OUTPUT"
+
       - name: 🚀 Create GitHub Release
         uses: softprops/action-gh-release@v2.3.2
         with:
