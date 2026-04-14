@@ -151,7 +151,7 @@ jobs:
           # 将原始长文件名重命名为短名
           OUTDIR="bin/targets/mediatek/filogic"
           ORIG_NAME="openwrt-${OPENWRT_VERSION}-mediatek-filogic-qihoo_360t7-squashfs-sysupgrade.itb"
-          SHORT_NAME="openwrt-${OPENWRT_VERSION}-360t7-sysupgrade-opns-$(date -u '+%Y%m%d').itb"
+          SHORT_NAME="openwrt-${OPENWRT_VERSION}-360t7-sysupgrade-opns-$(date -u '+%Y%m%d%H%M').itb"
           if [ -f "${OUTDIR}/${ORIG_NAME}" ]; then
             mv "${OUTDIR}/${ORIG_NAME}" "${OUTDIR}/${SHORT_NAME}"
             echo ">>> 已重命名：${ORIG_NAME} → ${SHORT_NAME} ✅"
@@ -190,7 +190,7 @@ jobs:
         run: |
           cd imagebuilder
           OUTDIR="bin/targets/mediatek/filogic"
-          FILENAME="openwrt-${OPENWRT_VERSION}-360t7-sysupgrade-opns-${{ steps.tag.outputs.tag }}.itb"
+          FILENAME="openwrt-${OPENWRT_VERSION}-360t7-sysupgrade-opns-$(date -u '+%Y%m%d%H%M')}.itb"
           FIRMWARE="${OUTDIR}/${FILENAME}"
           SHA256=$(grep "${FILENAME}" "${OUTDIR}/sha256sums" | awk '{print $1}')
           FILESIZE=$(ls -lh "${FIRMWARE}" | awk '{print $5}')
@@ -214,11 +214,11 @@ jobs:
         uses: softprops/action-gh-release@v2.3.2
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
-          name: "OpenWrt ${{ env.OPENWRT_VERSION }} for 360T7 · ${{ steps.tag.outputs.tag }}"
+          name: "OpenWrt ${{ env.OPENWRT_VERSION }} for 360T7·$(date -u '+%Y%m%d%H%M')}"
           body_path: ${{ steps.notes.outputs.notes_file }}
           draft: false
           prerelease: false
           files: |
-            imagebuilder/bin/targets/mediatek/filogic/openwrt-${{ env.OPENWRT_VERSION }}-360t7-opns-${{ steps.tag.outputs.tag }}.itb
+            imagebuilder/bin/targets/mediatek/filogic/openwrt-${{ env.OPENWRT_VERSION }}-360t7-opns-$(date -u '+%Y%m%d%H%M')}.itb
             imagebuilder/bin/targets/mediatek/filogic/sha256sums
           fail_on_unmatched_files: true
