@@ -38,14 +38,12 @@ jobs:
           VER="${OPENWRT_VERSION}"
 
           if [ "${VER}" = "SNAPSHOT" ]; then
-            # SNAPSHOT 路径规则
             DOWNLOAD_BASE="https://downloads.openwrt.org/snapshots/targets/${TARGET}"
             BUILDER_NAME="openwrt-imagebuilder-mediatek-filogic.Linux-x86_64"
             ORIG_FIRMWARE="openwrt-SNAPSHOT-mediatek-filogic-qihoo_360t7-squashfs-sysupgrade.itb"
-            NIKKI_BRANCH="openwrt-SNAPSHOT"
+            NIKKI_BRANCH="SNAPSHOT"   # ← 修复：去掉 openwrt- 前缀
             CACHE_KEY="imagebuilder-SNAPSHOT-mediatek-filogic-$(date -u '+%Y%m%d')"
           else
-            # 正式版路径规则
             DOWNLOAD_BASE="https://downloads.openwrt.org/releases/${VER}/targets/${TARGET}"
             BUILDER_NAME="openwrt-imagebuilder-${VER}-mediatek-filogic.Linux-x86_64"
             ORIG_FIRMWARE="openwrt-${VER}-mediatek-filogic-qihoo_360t7-squashfs-sysupgrade.itb"
