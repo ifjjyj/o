@@ -10,7 +10,7 @@ env:
   TARGET: "mediatek/filogic"
   PROFILE: "qihoo_360t7"
   ARCH: "aarch64_cortex-a53"
-  MIHOMO_VERSION: "1.19.23"
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 permissions:
   contents: write
 jobs:
@@ -19,7 +19,7 @@ jobs:
     timeout-minutes: 60
     steps:
       - name: 📥 Checkout repository
-        uses: actions/checkout@v4.2.2
+        uses: actions/checkout@v4
 
       - name: 🔧 Install dependencies
         run: |
@@ -33,7 +33,6 @@ jobs:
         id: meta
         run: |
           VER="${OPENWRT_VERSION}"
-
           BASE_PACKAGES="apk-mbedtls base-files ca-bundle dnsmasq-full dropbear \
             firewall4 fstools kmod-crypto-hw-safexcel \
             kmod-gpio-button-hotplug kmod-leds-gpio libc libgcc \
@@ -45,7 +44,6 @@ jobs:
             kmod-inet-diag ip-full kmod-dummy kmod-tcp-bbr sing-box \
             luci-i18n-base-zh-cn luci-i18n-firewall-zh-cn \
             luci-i18n-package-manager-zh-cn luci-i18n-nikki-zh-cn"
-
           if [ "${VER}" = "SNAPSHOT" ]; then
             DOWNLOAD_BASE="https://downloads.openwrt.org/snapshots/targets/${TARGET}"
             BUILDER_NAME="openwrt-imagebuilder-mediatek-filogic.Linux-x86_64"
@@ -147,7 +145,6 @@ jobs:
         run: |
           set -euo pipefail
           cd imagebuilder
-
           APK_REAL=$(find "$(pwd)" -name "apk" -type f -executable ! -path "/tmp/*" | head -1)
           [ -z "${APK_REAL}" ] && { echo "❌ 未找到 apk 二进制"; exit 1; }
           mkdir -p /tmp/apk-wrapper
@@ -204,7 +201,7 @@ jobs:
           EOF
           echo "notes_file=/tmp/release_notes.md" >> "$GITHUB_OUTPUT"
       - name: 🚀 Create GitHub Release
-        uses: softprops/action-gh-release@v2.3.2
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
           name: "OpenWrt ${{ env.OPENWRT_VERSION }} for 360T7 · ${{ steps.tag.outputs.tag }}"
