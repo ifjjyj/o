@@ -200,8 +200,6 @@ jobs:
           GH_SHA="${{ github.sha }}"
 
           cat > /tmp/release_notes.md << EOF
-          ## OpenWrt ${OWT_VER} for Qihoo 360T7
-
           ### 固件信息
           | 项目 | 值 |
           |------|-----|
@@ -209,7 +207,6 @@ jobs:
           | mihomo 版本 | ${MH_VER} |
           | 文件大小 | ${FILESIZE} |
           | SHA256 | \`${SHA256}\` |
-
           EOF
           echo "notes_file=/tmp/release_notes.md" >> "$GITHUB_OUTPUT"
 
