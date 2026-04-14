@@ -10,6 +10,7 @@ env:
   TARGET: "mediatek/filogic"
   PROFILE: "qihoo_360t7"
   ARCH: "aarch64_cortex-a53"
+  MIHOMO_VERSION: "1.19.23"
 permissions:
   contents: write
 jobs:
@@ -28,7 +29,6 @@ jobs:
             gettext libssl-dev xsltproc rsync wget unzip python3 \
             qemu-utils u-boot-tools squashfs-tools device-tree-compiler \
             fakeroot
-
       - name: 🔧 Resolve build metadata
         id: meta
         run: |
@@ -49,20 +49,20 @@ jobs:
           if [ "${VER}" = "SNAPSHOT" ]; then
             DOWNLOAD_BASE="https://downloads.openwrt.org/snapshots/targets/${TARGET}"
             BUILDER_NAME="openwrt-imagebuilder-mediatek-filogic.Linux-x86_64"
-            ORIG_FIRMWARE="openwrt-SNAPSHOT-mediatek-filogic-qihoo_360t7-squashfs-sysupgrade.itb"
+            # ★ SNAPSHOT 固件名无版本号前缀
+            ORIG_FIRMWARE="openwrt-mediatek-filogic-qihoo_360t7-squashfs-sysupgrade.itb"
             NIKKI_BRANCH="SNAPSHOT"
             CACHE_KEY="imagebuilder-SNAPSHOT-mediatek-filogic-$(date -u '+%Y%m%d')"
-            # ★ -fitblk：显式从 profile 默认包中剔除，防止被自动合并进来
             PACKAGES="${BASE_PACKAGES} -fitblk"
           else
             DOWNLOAD_BASE="https://downloads.openwrt.org/releases/${VER}/targets/${TARGET}"
             BUILDER_NAME="openwrt-imagebuilder-${VER}-mediatek-filogic.Linux-x86_64"
+            # 正式版固件名带版本号
             ORIG_FIRMWARE="openwrt-${VER}-mediatek-filogic-qihoo_360t7-squashfs-sysupgrade.itb"
             NIKKI_BRANCH="openwrt-${VER%.*}"
             CACHE_KEY="imagebuilder-${VER}-mediatek-filogic"
             PACKAGES="${BASE_PACKAGES} fitblk"
           fi
-
           echo "download_base=${DOWNLOAD_BASE}"   >> "$GITHUB_OUTPUT"
           echo "builder_name=${BUILDER_NAME}"     >> "$GITHUB_OUTPUT"
           echo "orig_firmware=${ORIG_FIRMWARE}"   >> "$GITHUB_OUTPUT"
@@ -73,21 +73,18 @@ jobs:
             echo "${PACKAGES}"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
-
           echo ">>> VER            : ${VER}"
           echo ">>> download_base  : ${DOWNLOAD_BASE}"
           echo ">>> builder_name   : ${BUILDER_NAME}"
           echo ">>> orig_firmware  : ${ORIG_FIRMWARE}"
           echo ">>> nikki_branch   : ${NIKKI_BRANCH}"
           echo ">>> cache_key      : ${CACHE_KEY}"
-
       - name: 💾 Cache ImageBuilder
         id: cache-imagebuilder
         uses: actions/cache@v4
         with:
           path: imagebuilder
           key: ${{ steps.meta.outputs.cache_key }}
-
       - name: 📦 Download ImageBuilder (cache miss only)
         if: steps.cache-imagebuilder.outputs.cache-hit != 'true'
         run: |
@@ -99,7 +96,6 @@ jobs:
           tar --zstd -xf "${BUILDER_NAME}.tar.zst"
           mv "${BUILDER_NAME}" imagebuilder
           echo ">>> ImageBuilder 准备完成 ✅"
-
       - name: ✔️ Confirm ImageBuilder ready
         run: |
           if [ "${{ steps.cache-imagebuilder.outputs.cache-hit }}" = "true" ]; then
@@ -107,7 +103,6 @@ jobs:
           else
             echo "✅ ImageBuilder 新鲜下载"
           fi
-
       - name: 🔌 Setup nikki feed
         run: |
           set -euo pipefail
@@ -116,24 +111,19 @@ jobs:
           NIKKI_FEED_URL="${NIKKI_BASE}/${NIKKI_BRANCH}/${ARCH}/nikki/packages.adb"
           echo ">>> nikki branch  : ${NIKKI_BRANCH}"
           echo ">>> nikki feed URL: ${NIKKI_FEED_URL}"
-
           APK_KEYS_DIR=$(find imagebuilder -path "*/apk/keys" -type d | head -1)
           [ -z "${APK_KEYS_DIR}" ] && APK_KEYS_DIR=$(find imagebuilder -name "keys" -type d | head -1)
           [ -z "${APK_KEYS_DIR}" ] && { echo "❌ 未找到 keys 目录"; exit 1; }
-
           wget -q "${NIKKI_BASE}/public-key.pem" -O "${APK_KEYS_DIR}/nikki.pem" || {
             echo "❌ nikki 公钥下载失败"; exit 1
           }
           echo ">>> 公钥已安装 ✅"
-
           REPO_CONF=$(find imagebuilder -maxdepth 2 -name "repositories.conf" | head -1)
           [ -z "${REPO_CONF}" ] && REPO_CONF=$(find imagebuilder -maxdepth 2 -name "repositories*" | head -1)
           [ -z "${REPO_CONF}" ] && { echo "❌ 未找到 repositories 配置文件"; exit 1; }
-
           echo "${NIKKI_FEED_URL}" >> "${REPO_CONF}"
           echo ">>> nikki feed 注册完成 ✅"
           cat "${REPO_CONF}"
-
       - name: 🔍 Verify profile exists
         run: |
           cd imagebuilder
@@ -142,7 +132,6 @@ jobs:
             make info; exit 1
           }
           echo ">>> Profile 确认存在 ✅"
-
       - name: 🏷️ Generate release tag
         id: tag
         run: |
@@ -154,7 +143,6 @@ jobs:
           echo "filename=${FILENAME}" >> "$GITHUB_OUTPUT"
           echo ">>> Release tag      : ${TAG}"
           echo ">>> Firmware filename: ${FILENAME}"
-
       - name: 🏗️ Build firmware
         run: |
           set -euo pipefail
@@ -162,27 +150,22 @@ jobs:
 
           APK_REAL=$(find "$(pwd)" -name "apk" -type f -executable ! -path "/tmp/*" | head -1)
           [ -z "${APK_REAL}" ] && { echo "❌ 未找到 apk 二进制"; exit 1; }
-
           mkdir -p /tmp/apk-wrapper
           printf '#!/bin/sh\nexec "%s" --allow-untrusted "$@"\n' "${APK_REAL}" > /tmp/apk-wrapper/apk
           chmod +x /tmp/apk-wrapper/apk
           export PATH="/tmp/apk-wrapper:${PATH}"
-
           echo ">>> 开始构建，时间: $(date)"
           echo ">>> 包列表："
           echo "${{ steps.meta.outputs.packages }}"
           echo "---"
-
           make image \
             APK="/tmp/apk-wrapper/apk" \
             PROFILE="${PROFILE}" \
             PACKAGES="${{ steps.meta.outputs.packages }}" \
             FILES="../files"
-
           OUTDIR="bin/targets/mediatek/filogic"
           ORIG_NAME="${{ steps.meta.outputs.orig_firmware }}"
           SHORT_NAME="${{ steps.tag.outputs.filename }}"
-
           if [ -f "${OUTDIR}/${ORIG_NAME}" ]; then
             mv "${OUTDIR}/${ORIG_NAME}" "${OUTDIR}/${SHORT_NAME}"
             sed -i "s/${ORIG_NAME}/${SHORT_NAME}/g" "${OUTDIR}/sha256sums"
@@ -192,7 +175,6 @@ jobs:
             ls -lh "${OUTDIR}/"
             exit 1
           fi
-
       - name: ✅ Verify output
         run: |
           cd imagebuilder
@@ -200,7 +182,6 @@ jobs:
           ls -lh "${OUTDIR}/"
           cat "${OUTDIR}/sha256sums"
           echo "✅ 固件构建成功：${{ steps.tag.outputs.filename }}"
-
       - name: 📝 Generate release notes
         id: notes
         run: |
@@ -211,18 +192,17 @@ jobs:
           SHA256=$(grep "${FILENAME}" "${OUTDIR}/sha256sums" | awk '{print $1}')
           FILESIZE=$(ls -lh "${FIRMWARE}" | awk '{print $5}')
           BUILD_TIME=$(date -u '+%Y-%m-%d %H:%M UTC')
-
           cat > /tmp/release_notes.md << EOF
           ### 固件信息
           | 项目 | 值 |
           |------|-----|
           | OpenWrt 版本 | ${OPENWRT_VERSION} |
+          | mihomo 版本 | ${MIHOMO_VERSION} |
           | 构建时间 | ${BUILD_TIME} |
           | 文件大小 | ${FILESIZE} |
           | SHA256 | \`${SHA256}\` |
           EOF
           echo "notes_file=/tmp/release_notes.md" >> "$GITHUB_OUTPUT"
-
       - name: 🚀 Create GitHub Release
         uses: softprops/action-gh-release@v2.3.2
         with:
