@@ -6,7 +6,6 @@ on:
       - '.github/workflows/snapshot-opns.yml'
       - 'files/**'
 env:
-  # 正式版填版本号如 "25.12.2"，SNAPSHOT 填 "SNAPSHOT"
   OPENWRT_VERSION: "SNAPSHOT"
   TARGET: "mediatek/filogic"
   PROFILE: "qihoo_360t7"
@@ -35,7 +34,6 @@ jobs:
         run: |
           VER="${OPENWRT_VERSION}"
 
-          # 所有版本共用的基础包（不含 fitblk，因 SNAPSHOT 无 fit-check-sign）
           BASE_PACKAGES="apk-mbedtls base-files ca-bundle dnsmasq-full dropbear \
             firewall4 fstools kmod-crypto-hw-safexcel \
             kmod-gpio-button-hotplug kmod-leds-gpio libc libgcc \
@@ -54,15 +52,14 @@ jobs:
             ORIG_FIRMWARE="openwrt-SNAPSHOT-mediatek-filogic-qihoo_360t7-squashfs-sysupgrade.itb"
             NIKKI_BRANCH="SNAPSHOT"
             CACHE_KEY="imagebuilder-SNAPSHOT-mediatek-filogic-$(date -u '+%Y%m%d')"
-            # fitblk 依赖 fit-check-sign，SNAPSHOT 中不存在，排除
-            PACKAGES="${BASE_PACKAGES}"
+            # ★ -fitblk：显式从 profile 默认包中剔除，防止被自动合并进来
+            PACKAGES="${BASE_PACKAGES} -fitblk"
           else
             DOWNLOAD_BASE="https://downloads.openwrt.org/releases/${VER}/targets/${TARGET}"
             BUILDER_NAME="openwrt-imagebuilder-${VER}-mediatek-filogic.Linux-x86_64"
             ORIG_FIRMWARE="openwrt-${VER}-mediatek-filogic-qihoo_360t7-squashfs-sysupgrade.itb"
             NIKKI_BRANCH="openwrt-${VER%.*}"
             CACHE_KEY="imagebuilder-${VER}-mediatek-filogic"
-            # 正式版包含 fitblk
             PACKAGES="${BASE_PACKAGES} fitblk"
           fi
 
