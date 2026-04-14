@@ -325,6 +325,8 @@ rule-providers:
   speed:    {type: http, format: mrs, interval: 86400, behavior: domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/ookla-speedtest.mrs", path: ./ruleset/speedtest.mrs}
   dropbox:  {type: http, format: mrs, interval: 86400, behavior: domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/dropbox.mrs", path: ./ruleset/dropbox.mrs}
   OD-OD:    {type: http, format: mrs, interval: 86400, behavior: domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/onedrive.mrs", path: ./ruleset/onedrive.mrs}
+  filter:   {type: http, format: mrs, interval: 86400, behavior: domain, url: "https://github.com/DustinWin/ruleset_geodata/releases/download/mihomo-ruleset/fakeip-filter.mrs", path: ./ruleset/filter.mrs}
+  ntp:      {type: http, format: mrs, interval: 86400, behavior: domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/refs/heads/meta/geo/geosite/category-ntp.mrs", path: ./ruleset/ntp.mrs}
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 互联网大厂 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   google:   {type: http, format: mrs, interval: 86400, behavior: domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/google.mrs", path: ./ruleset/google.mrs}
   gg_ip:    {type: http, format: mrs, interval: 86400, behavior: ipcidr, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geoip/google.mrs", path: ./ruleset/gg_ip.mrs}
@@ -342,5 +344,3 @@ rule-providers:
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 内网/私有 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   private:  {type: http, format: mrs, interval: 86400, behavior: domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/private.mrs", path: ./ruleset/private.mrs}
   pv_ip:    {type: http, format: mrs, interval: 86400, behavior: ipcidr, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geoip/private.mrs", path: ./ruleset/private_ip.mrs}
-  filter:   {type: http, format: mrs, interval: 86400, behavior: domain, url: "https://github.com/DustinWin/ruleset_geodata/releases/download/mihomo-ruleset/fakeip-filter.mrs", path: ./ruleset/filter.mrs}
-  ntp:      {type: http, format: mrs, interval: 86400, behavior: domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/refs/heads/meta/geo/geosite/category-ntp.mrs", path: ./ruleset/ntp.mrs}
