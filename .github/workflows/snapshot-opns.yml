@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - '.github/workflows/snapshot-opns.yml'
+      - '.github/workflows/opns.yml'
       - 'files/**'
 env:
   # 正式版填版本号如 "25.12.2"，SNAPSHOT 填 "SNAPSHOT"
@@ -11,7 +11,6 @@ env:
   TARGET: "mediatek/filogic"
   PROFILE: "qihoo_360t7"
   ARCH: "aarch64_cortex-a53"
-  MIHOMO_VERSION: "1.19.23"
 permissions:
   contents: write
 jobs:
@@ -31,24 +30,40 @@ jobs:
             qemu-utils u-boot-tools squashfs-tools device-tree-compiler \
             fakeroot
 
-      # ★ 核心：统一计算所有与版本相关的路径变量
       - name: 🔧 Resolve build metadata
         id: meta
         run: |
           VER="${OPENWRT_VERSION}"
 
+          # 所有版本共用的基础包（不含 fitblk，因 SNAPSHOT 无 fit-check-sign）
+          BASE_PACKAGES="apk-mbedtls base-files ca-bundle dnsmasq-full dropbear \
+            firewall4 fstools kmod-crypto-hw-safexcel \
+            kmod-gpio-button-hotplug kmod-leds-gpio libc libgcc \
+            libustream-mbedtls logd mtd netifd nftables odhcp6c \
+            odhcpd-ipv6only ppp ppp-mod-pppoe procd-ujail uboot-envtools \
+            uci uclient-fetch urandom-seed urngd wpad-basic-mbedtls \
+            kmod-mt7915e kmod-mt7981-firmware mt7981-wo-firmware luci \
+            openssh-sftp-server zoneinfo-asia kmod-nft-offload kmod-nft-socket kmod-nft-tproxy kmod-tun \
+            kmod-inet-diag ip-full kmod-dummy kmod-tcp-bbr sing-box \
+            luci-i18n-base-zh-cn luci-i18n-firewall-zh-cn \
+            luci-i18n-package-manager-zh-cn luci-i18n-nikki-zh-cn"
+
           if [ "${VER}" = "SNAPSHOT" ]; then
             DOWNLOAD_BASE="https://downloads.openwrt.org/snapshots/targets/${TARGET}"
             BUILDER_NAME="openwrt-imagebuilder-mediatek-filogic.Linux-x86_64"
             ORIG_FIRMWARE="openwrt-SNAPSHOT-mediatek-filogic-qihoo_360t7-squashfs-sysupgrade.itb"
-            NIKKI_BRANCH="SNAPSHOT"   # ← 修复：去掉 openwrt- 前缀
+            NIKKI_BRANCH="SNAPSHOT"
             CACHE_KEY="imagebuilder-SNAPSHOT-mediatek-filogic-$(date -u '+%Y%m%d')"
+            # fitblk 依赖 fit-check-sign，SNAPSHOT 中不存在，排除
+            PACKAGES="${BASE_PACKAGES}"
           else
             DOWNLOAD_BASE="https://downloads.openwrt.org/releases/${VER}/targets/${TARGET}"
             BUILDER_NAME="openwrt-imagebuilder-${VER}-mediatek-filogic.Linux-x86_64"
             ORIG_FIRMWARE="openwrt-${VER}-mediatek-filogic-qihoo_360t7-squashfs-sysupgrade.itb"
             NIKKI_BRANCH="openwrt-${VER%.*}"
             CACHE_KEY="imagebuilder-${VER}-mediatek-filogic"
+            # 正式版包含 fitblk
+            PACKAGES="${BASE_PACKAGES} fitblk"
           fi
 
           echo "download_base=${DOWNLOAD_BASE}"   >> "$GITHUB_OUTPUT"
@@ -56,7 +71,13 @@ jobs:
           echo "orig_firmware=${ORIG_FIRMWARE}"   >> "$GITHUB_OUTPUT"
           echo "nikki_branch=${NIKKI_BRANCH}"     >> "$GITHUB_OUTPUT"
           echo "cache_key=${CACHE_KEY}"           >> "$GITHUB_OUTPUT"
+          {
+            echo "packages<<EOF"
+            echo "${PACKAGES}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
+          echo ">>> VER            : ${VER}"
           echo ">>> download_base  : ${DOWNLOAD_BASE}"
           echo ">>> builder_name   : ${BUILDER_NAME}"
           echo ">>> orig_firmware  : ${ORIG_FIRMWARE}"
@@ -75,11 +96,9 @@ jobs:
         run: |
           BUILDER_NAME="${{ steps.meta.outputs.builder_name }}"
           DOWNLOAD_BASE="${{ steps.meta.outputs.download_base }}"
-          echo ">>> 下载 ImageBuilder..."
           echo ">>> URL: ${DOWNLOAD_BASE}/${BUILDER_NAME}.tar.zst"
           wget --progress=bar:force \
             "${DOWNLOAD_BASE}/${BUILDER_NAME}.tar.zst"
-          echo ">>> 解压中..."
           tar --zstd -xf "${BUILDER_NAME}.tar.zst"
           mv "${BUILDER_NAME}" imagebuilder
           echo ">>> ImageBuilder 准备完成 ✅"
@@ -127,7 +146,6 @@ jobs:
           }
           echo ">>> Profile 确认存在 ✅"
 
-      # ★ Build 之前生成 tag 和最终文件名
       - name: 🏷️ Generate release tag
         id: tag
         run: |
@@ -137,7 +155,7 @@ jobs:
           FILENAME="openwrt-${OPENWRT_VERSION}-360t7-opns-${TAG}.itb"
           echo "tag=${TAG}"           >> "$GITHUB_OUTPUT"
           echo "filename=${FILENAME}" >> "$GITHUB_OUTPUT"
-          echo ">>> Release tag     : ${TAG}"
+          echo ">>> Release tag      : ${TAG}"
           echo ">>> Firmware filename: ${FILENAME}"
 
       - name: 🏗️ Build firmware
@@ -154,20 +172,14 @@ jobs:
           export PATH="/tmp/apk-wrapper:${PATH}"
 
           echo ">>> 开始构建，时间: $(date)"
+          echo ">>> 包列表："
+          echo "${{ steps.meta.outputs.packages }}"
+          echo "---"
+
           make image \
             APK="/tmp/apk-wrapper/apk" \
             PROFILE="${PROFILE}" \
-            PACKAGES="apk-mbedtls base-files ca-bundle dnsmasq-full dropbear \
-              firewall4 fitblk fstools kmod-crypto-hw-safexcel \
-              kmod-gpio-button-hotplug kmod-leds-gpio libc libgcc \
-              libustream-mbedtls logd mtd netifd nftables odhcp6c \
-              odhcpd-ipv6only ppp ppp-mod-pppoe procd-ujail uboot-envtools \
-              uci uclient-fetch urandom-seed urngd wpad-basic-mbedtls \
-              kmod-mt7915e kmod-mt7981-firmware mt7981-wo-firmware luci \
-              openssh-sftp-server zoneinfo-asia kmod-nft-offload kmod-nft-socket kmod-nft-tproxy kmod-tun \
-              kmod-inet-diag ip-full kmod-dummy kmod-tcp-bbr sing-box \
-              luci-i18n-base-zh-cn luci-i18n-firewall-zh-cn \
-              luci-i18n-package-manager-zh-cn luci-i18n-nikki-zh-cn" \
+            PACKAGES="${{ steps.meta.outputs.packages }}" \
             FILES="../files"
 
           OUTDIR="bin/targets/mediatek/filogic"
@@ -208,7 +220,6 @@ jobs:
           | 项目 | 值 |
           |------|-----|
           | OpenWrt 版本 | ${OPENWRT_VERSION} |
-          | mihomo 版本 | ${MIHOMO_VERSION} |
           | 构建时间 | ${BUILD_TIME} |
           | 文件大小 | ${FILESIZE} |
           | SHA256 | \`${SHA256}\` |
