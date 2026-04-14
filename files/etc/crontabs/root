@@ -1,1 +1,2 @@
-
+1 2 * * * /sbin/reboot                   #每日重启
+*/5 * * * * /etc/init.d/nikki clear_logs #nikki log scheduled clear
