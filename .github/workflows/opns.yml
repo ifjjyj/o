@@ -23,14 +23,12 @@ jobs:
 
       - name: 🔧 Install dependencies
         run: |
-          echo ">>> 安装构建依赖..."
           sudo apt-get update -qq
           sudo apt-get install -y \
             build-essential libncurses-dev zlib1g-dev gawk \
             gettext libssl-dev xsltproc rsync wget unzip python3 \
             qemu-utils u-boot-tools squashfs-tools device-tree-compiler \
             fakeroot
-          echo ">>> 依赖安装完成"
 
       - name: 💾 Cache ImageBuilder
         id: cache-imagebuilder
@@ -43,13 +41,10 @@ jobs:
         if: steps.cache-imagebuilder.outputs.cache-hit != 'true'
         run: |
           BUILDER="openwrt-imagebuilder-${OPENWRT_VERSION}-mediatek-filogic.Linux-x86_64"
-          echo ">>> 缓存未命中，下载 ImageBuilder ${OPENWRT_VERSION}..."
           wget --progress=bar:force \
             "https://downloads.openwrt.org/releases/${OPENWRT_VERSION}/targets/${TARGET}/${BUILDER}.tar.zst"
-          echo ">>> 解压中..."
           tar --zstd -xf "${BUILDER}.tar.zst"
           mv "${BUILDER}" imagebuilder
-          echo ">>> ImageBuilder 准备完成"
 
       - name: ✔️ Confirm ImageBuilder ready
         run: |
@@ -65,37 +60,20 @@ jobs:
           NIKKI_BASE="https://nikkinikki.pages.dev"
           OPENWRT_BRANCH="openwrt-${OPENWRT_VERSION%.*}"
           NIKKI_FEED_URL="${NIKKI_BASE}/${OPENWRT_BRANCH}/${ARCH}/nikki/packages.adb"
-          echo ">>> [1/2] 安装 nikki 签名公钥..."
-          APK_KEYS_DIR=$(find imagebuilder -path "*/apk/keys" -type d | head -1)
-          if [ -z "${APK_KEYS_DIR}" ]; then
-            APK_KEYS_DIR=$(find imagebuilder -name "keys" -type d | head -1)
-          fi
-          if [ -z "${APK_KEYS_DIR}" ]; then
-            echo "❌ 未找到任何 keys 目录"; exit 1
-          fi
-          echo ">>> keys 目录：${APK_KEYS_DIR}"
-          wget -q "${NIKKI_BASE}/public-key.pem" \
-               -O "${APK_KEYS_DIR}/nikki.pem" || {
-            echo "❌ nikki 公钥下载失败：${NIKKI_BASE}/public-key.pem"
-            exit 1
-          }
-          echo ">>> 公钥已安装 ✅"
 
-          echo ">>> [2/2] 注册 nikki feed..."
-          REPO_CONF=$(find imagebuilder -maxdepth 2 \
-                      -name "repositories.conf" | head -1)
-          if [ -z "${REPO_CONF}" ]; then
-            REPO_CONF=$(find imagebuilder -maxdepth 2 \
-                        -name "repositories*" | head -1)
-          fi
-          if [ -z "${REPO_CONF}" ]; then
-            echo "❌ 未找到 repositories 配置文件"; exit 1
-          fi
-          echo ">>> 配置文件：${REPO_CONF}"
-          echo ">>> feed URL：${NIKKI_FEED_URL}"
+          APK_KEYS_DIR=$(find imagebuilder -path "*/apk/keys" -type d | head -1)
+          [ -z "${APK_KEYS_DIR}" ] && APK_KEYS_DIR=$(find imagebuilder -name "keys" -type d | head -1)
+          [ -z "${APK_KEYS_DIR}" ] && { echo "❌ 未找到 keys 目录"; exit 1; }
+
+          wget -q "${NIKKI_BASE}/public-key.pem" -O "${APK_KEYS_DIR}/nikki.pem" || {
+            echo "❌ nikki 公钥下载失败"; exit 1
+          }
+
+          REPO_CONF=$(find imagebuilder -maxdepth 2 -name "repositories.conf" | head -1)
+          [ -z "${REPO_CONF}" ] && REPO_CONF=$(find imagebuilder -maxdepth 2 -name "repositories*" | head -1)
+          [ -z "${REPO_CONF}" ] && { echo "❌ 未找到 repositories 配置文件"; exit 1; }
+
           echo "${NIKKI_FEED_URL}" >> "${REPO_CONF}"
-          echo ">>> 注册后 repositories 内容："
-          cat "${REPO_CONF}"
           echo ">>> nikki feed 注册完成 ✅"
 
       - name: 🔍 Verify profile exists
@@ -106,30 +84,34 @@ jobs:
             make info
             exit 1
           }
-          echo ">>> Profile 确认存在 ✅"
+
+      # ★ 关键：在 Build 之前生成 tag 和 filename，后续所有步骤统一引用
+      - name: 🏷️ Generate release tag
+        id: tag
+        run: |
+          DATETIME=$(date -u '+%Y%m%d%H%M')
+          RUN_NUM="${{ github.run_number }}"
+          TAG="${DATETIME}-${RUN_NUM}"
+          FILENAME="openwrt-${OPENWRT_VERSION}-360t7-opns-${TAG}.itb"
+          echo "tag=${TAG}"           >> "$GITHUB_OUTPUT"
+          echo "filename=${FILENAME}" >> "$GITHUB_OUTPUT"
+          echo ">>> Release tag: ${TAG}"
+          echo ">>> Firmware filename: ${FILENAME}"
 
       - name: 🏗️ Build firmware
         run: |
           set -euo pipefail
           cd imagebuilder
-          APK_REAL=$(find "$(pwd)" -name "apk" -type f -executable \
-                     ! -path "/tmp/*" | head -1)
-          if [ -z "${APK_REAL}" ]; then
-            echo "❌ 未找到 ImageBuilder 内置 apk 二进制"; exit 1
-          fi
-          echo ">>> 真实 apk 路径：${APK_REAL}"
+
+          APK_REAL=$(find "$(pwd)" -name "apk" -type f -executable ! -path "/tmp/*" | head -1)
+          [ -z "${APK_REAL}" ] && { echo "❌ 未找到 apk 二进制"; exit 1; }
 
           mkdir -p /tmp/apk-wrapper
-          printf '#!/bin/sh\nexec "%s" --allow-untrusted "$@"\n' \
-            "${APK_REAL}" > /tmp/apk-wrapper/apk
+          printf '#!/bin/sh\nexec "%s" --allow-untrusted "$@"\n' "${APK_REAL}" > /tmp/apk-wrapper/apk
           chmod +x /tmp/apk-wrapper/apk
-          echo ">>> wrapper 内容："
-          cat /tmp/apk-wrapper/apk
           export PATH="/tmp/apk-wrapper:${PATH}"
-          echo ">>> which apk：$(which apk)"
 
-          echo ">>> 开始构建固件，Profile: ${PROFILE}，时间: $(date)"
-          echo "---"
+          echo ">>> 开始构建固件，时间: $(date)"
           make image \
             APK="/tmp/apk-wrapper/apk" \
             PROFILE="${PROFILE}" \
@@ -145,20 +127,18 @@ jobs:
               luci-i18n-base-zh-cn luci-i18n-firewall-zh-cn \
               luci-i18n-package-manager-zh-cn luci-i18n-nikki-zh-cn" \
             FILES="../files"
-          echo "---"
-          echo ">>> 构建完成，时间: $(date)"
 
-          # 将原始长文件名重命名为短名
           OUTDIR="bin/targets/mediatek/filogic"
           ORIG_NAME="openwrt-${OPENWRT_VERSION}-mediatek-filogic-qihoo_360t7-squashfs-sysupgrade.itb"
-          SHORT_NAME="openwrt-${OPENWRT_VERSION}-360t7-sysupgrade-opns-$(date -u '+%Y%m%d%H%M').itb"
+          # ★ 直接引用前面步骤生成的 filename
+          SHORT_NAME="${{ steps.tag.outputs.filename }}"
+
           if [ -f "${OUTDIR}/${ORIG_NAME}" ]; then
             mv "${OUTDIR}/${ORIG_NAME}" "${OUTDIR}/${SHORT_NAME}"
-            echo ">>> 已重命名：${ORIG_NAME} → ${SHORT_NAME} ✅"
             sed -i "s/${ORIG_NAME}/${SHORT_NAME}/g" "${OUTDIR}/sha256sums"
-            echo ">>> sha256sums 已同步更新 ✅"
+            echo ">>> 已重命名为：${SHORT_NAME} ✅"
           else
-            echo "❌ 未找到原始固件文件：${ORIG_NAME}"
+            echo "❌ 未找到原始固件：${ORIG_NAME}"
             ls -lh "${OUTDIR}/"
             exit 1
           fi
@@ -167,44 +147,31 @@ jobs:
         run: |
           cd imagebuilder
           OUTDIR="bin/targets/mediatek/filogic"
-          SYSUPGRADE=$(ls "${OUTDIR}"/*sysupgrade* 2>/dev/null | head -1)
-          if [ -z "${SYSUPGRADE}" ]; then
-            echo "❌ 未找到 sysupgrade 固件"; exit 1
-          fi
+          SYSUPGRADE=$(ls "${OUTDIR}"/*.itb 2>/dev/null | head -1)
+          [ -z "${SYSUPGRADE}" ] && { echo "❌ 未找到固件"; exit 1; }
           ls -lh "${OUTDIR}/"
-          echo ""
           cat "${OUTDIR}/sha256sums"
-          echo ""
           echo "✅ 固件构建成功：$(basename "${SYSUPGRADE}")"
-
-      - name: 🏷️ Generate release tag
-        id: tag
-        run: |
-          DATE=$(date -u '+%Y%m%d')
-          TAG="${DATE}-r${{ github.run_number }}"
-          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-          echo ">>> Release tag: ${TAG}"
 
       - name: 📝 Generate release notes
         id: notes
         run: |
           cd imagebuilder
           OUTDIR="bin/targets/mediatek/filogic"
-          FILENAME="openwrt-${OPENWRT_VERSION}-360t7-sysupgrade-opns-${{ steps.tag.outputs.tag }}.itb"
+          # ★ 统一引用同一个 filename
+          FILENAME="${{ steps.tag.outputs.filename }}"
           FIRMWARE="${OUTDIR}/${FILENAME}"
           SHA256=$(grep "${FILENAME}" "${OUTDIR}/sha256sums" | awk '{print $1}')
           FILESIZE=$(ls -lh "${FIRMWARE}" | awk '{print $5}')
           BUILD_TIME=$(date -u '+%Y-%m-%d %H:%M UTC')
-          OWT_VER="${OPENWRT_VERSION}"
-          MH_VER="${MIHOMO_VERSION}"
-          GH_SHA="${{ github.sha }}"
 
           cat > /tmp/release_notes.md << EOF
           ### 固件信息
           | 项目 | 值 |
           |------|-----|
-          | OpenWrt 版本 | ${OWT_VER} |
-          | mihomo 版本 | ${MH_VER} |
+          | OpenWrt 版本 | ${OPENWRT_VERSION} |
+          | mihomo 版本 | ${MIHOMO_VERSION} |
+          | 构建时间 | ${BUILD_TIME} |
           | 文件大小 | ${FILESIZE} |
           | SHA256 | \`${SHA256}\` |
           EOF
@@ -219,6 +186,6 @@ jobs:
           draft: false
           prerelease: false
           files: |
-            imagebuilder/bin/targets/mediatek/filogic/openwrt-${{ env.OPENWRT_VERSION }}-360t7-opns-$(date -u '+%Y%m%d%H%M').itb
+            imagebuilder/bin/targets/mediatek/filogic/${{ steps.tag.outputs.filename }}
             imagebuilder/bin/targets/mediatek/filogic/sha256sums
           fail_on_unmatched_files: true
