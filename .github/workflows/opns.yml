@@ -151,7 +151,7 @@ jobs:
           # 将原始长文件名重命名为短名
           OUTDIR="bin/targets/mediatek/filogic"
           ORIG_NAME="openwrt-${OPENWRT_VERSION}-mediatek-filogic-qihoo_360t7-squashfs-sysupgrade.itb"
-          SHORT_NAME="openwrt-${OPENWRT_VERSION}-360t7-sysupgrade-opns.itb"
+          SHORT_NAME="openwrt-${OPENWRT_VERSION}-360t7-sysupgrade-opns-$(date -u '+%Y%m%d').itb"
           if [ -f "${OUTDIR}/${ORIG_NAME}" ]; then
             mv "${OUTDIR}/${ORIG_NAME}" "${OUTDIR}/${SHORT_NAME}"
             echo ">>> 已重命名：${ORIG_NAME} → ${SHORT_NAME} ✅"
