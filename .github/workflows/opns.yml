@@ -89,7 +89,7 @@ jobs:
       - name: 🏷️ Generate release tag
         id: tag
         run: |
-          DATETIME=$(date -u '+%Y%m%d%H%M')
+          DATETIME=$(date -u '+%Y%m%d')
           RUN_NUM="${{ github.run_number }}"
           TAG="${DATETIME}-${RUN_NUM}"
           FILENAME="openwrt-${OPENWRT_VERSION}-360t7-opns-${TAG}.itb"
