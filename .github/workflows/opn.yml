@@ -1,27 +1,22 @@
 name: 360T7 opn
-
 on:
   workflow_dispatch:
   push:
     paths:
       - '.github/workflows/opn.yml'
       - 'files/**'
-
 env:
   OPENWRT_VERSION: "25.12.2"
   TARGET: "mediatek/filogic"
   PROFILE: "qihoo_360t7"
   ARCH: "aarch64_cortex-a53"
   MIHOMO_VERSION: "1.19.23"
-
 permissions:
   contents: write
-
 jobs:
   build:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
-
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4.2.2
@@ -67,11 +62,9 @@ jobs:
       - name: 🔌 Setup nikki feed
         run: |
           set -euo pipefail
-
           NIKKI_BASE="https://nikkinikki.pages.dev"
           OPENWRT_BRANCH="openwrt-${OPENWRT_VERSION%.*}"
           NIKKI_FEED_URL="${NIKKI_BASE}/${OPENWRT_BRANCH}/${ARCH}/nikki/packages.adb"
-
           echo ">>> [1/2] 安装 nikki 签名公钥..."
           APK_KEYS_DIR=$(find imagebuilder -path "*/apk/keys" -type d | head -1)
           if [ -z "${APK_KEYS_DIR}" ]; then
@@ -119,7 +112,6 @@ jobs:
         run: |
           set -euo pipefail
           cd imagebuilder
-
           APK_REAL=$(find "$(pwd)" -name "apk" -type f -executable \
                      ! -path "/tmp/*" | head -1)
           if [ -z "${APK_REAL}" ]; then
@@ -133,7 +125,6 @@ jobs:
           chmod +x /tmp/apk-wrapper/apk
           echo ">>> wrapper 内容："
           cat /tmp/apk-wrapper/apk
-
           export PATH="/tmp/apk-wrapper:${PATH}"
           echo ">>> which apk：$(which apk)"
 
@@ -149,13 +140,10 @@ jobs:
               odhcpd-ipv6only ppp ppp-mod-pppoe procd-ujail uboot-envtools \
               uci uclient-fetch urandom-seed urngd wpad-basic-mbedtls \
               kmod-mt7915e kmod-mt7981-firmware mt7981-wo-firmware luci \
-              openssh-sftp-server zoneinfo-asia curl yq \
-              kmod-nft-offload kmod-nft-socket kmod-nft-tproxy kmod-tun \
+              openssh-sftp-server zoneinfo-asia kmod-nft-offload kmod-nft-socket kmod-nft-tproxy kmod-tun \
               kmod-inet-diag ip-full kmod-dummy kmod-tcp-bbr \
-              luci-app-attendedsysupgrade luci-i18n-attendedsysupgrade-zh-cn \
               luci-i18n-base-zh-cn luci-i18n-firewall-zh-cn \
-              luci-i18n-package-manager-zh-cn \
-              nikki luci-app-nikki luci-i18n-nikki-zh-cn" \
+              luci-i18n-package-manager-zh-cn luci-i18n-nikki-zh-cn" \
             FILES="../files"
           echo "---"
           echo ">>> 构建完成，时间: $(date)"
