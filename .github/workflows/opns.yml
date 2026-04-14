@@ -190,7 +190,7 @@ jobs:
         run: |
           cd imagebuilder
           OUTDIR="bin/targets/mediatek/filogic"
-          FILENAME="openwrt-${OPENWRT_VERSION}-360t7-sysupgrade-opns-$(date -u '+%Y%m%d%H%M').itb"
+          FILENAME="openwrt-${OPENWRT_VERSION}-360t7-sysupgrade-opns-${{ steps.tag.outputs.tag }}.itb"
           FIRMWARE="${OUTDIR}/${FILENAME}"
           SHA256=$(grep "${FILENAME}" "${OUTDIR}/sha256sums" | awk '{print $1}')
           FILESIZE=$(ls -lh "${FIRMWARE}" | awk '{print $5}')
@@ -214,7 +214,7 @@ jobs:
         uses: softprops/action-gh-release@v2.3.2
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
-          name: "OpenWrt ${{ env.OPENWRT_VERSION }} for 360T7·$(date -u '+%Y%m%d%H%M')"
+          name: "OpenWrt ${{ env.OPENWRT_VERSION }} for 360T7 · ${{ steps.tag.outputs.tag }}"
           body_path: ${{ steps.notes.outputs.notes_file }}
           draft: false
           prerelease: false
