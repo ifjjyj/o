@@ -3,8 +3,8 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - '.github/workflows/snapshot-opns.yml'
-      - 'files/**'
+      #- '.github/workflows/snapshot-opns.yml'
+      #- 'files/**'
 env:
   OPENWRT_VERSION: "SNAPSHOT"
   TARGET: "mediatek/filogic"
