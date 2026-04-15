@@ -89,9 +89,9 @@ tun:
   auto-route: true                                     # [true/false] 自动设置全局路由，将流量引入 TUN 网卡
   auto-redirect: true                                  # [true/false] 自动配置 iptables/nftables 重定向 TCP，仅 Linux，需 auto-route 已启用
   auto-detect-interface: true                          # [true/false] 自动检测流量出站网卡，多网卡设备建议手动指定
-  strict-route: false                                  # [true/false] 严格路由：防止地址泄漏，在 Android 上确保 DNS 劫持生效
-  disable-icmp-forwarding: false                       # [true/false] 启用或禁止转发 ICMP 包
-  endpoint-independent-nat: false                      # [true/false] 端点独立的 NAT（Full-cone NAT），改善 UDP 打洞，但会增加内存占用
+  strict-route: true                                  # [true/false] 严格路由：防止地址泄漏，在 Android 上确保 DNS 劫持生效
+  disable-icmp-forwarding: true                        # [true/false] 启用或禁止转发 ICMP 包
+  endpoint-independent-nat: true                      # [true/false] 端点独立的 NAT（Full-cone NAT），改善 UDP 打洞，但会增加内存占用
   dns-hijack: [ "any:53", "tcp://any:53" ]             # 劫持所有 DNS 请求（UDP+TCP）导入内部 DNS 模块
   mtu: 1500                                            # TUN 网卡 MTU，影响极限速率，一般保持默认
   gso: true                                            # [true/false] 启用通用分段卸载（GSO），仅 Linux，可提升吞吐
@@ -198,9 +198,9 @@ rules:
   - DST-PORT,19302-19309,REJECT                        # Google STUN 端口
   #- DOMAIN-KEYWORD,stun,REJECT                        # STUN 域名关键字
   # ── 广告拦截 ──
-  - RULE-SET,Johnson,REJECT
+  #- RULE-SET,Johnson,REJECT
   - RULE-SET,QRuWGQ,REJECT
-  - RULE-SET,Quixotic,REJECT
+  #- RULE-SET,Quixotic,REJECT
   #- RULE-SET,adrules,REJECT
   #- RULE-SET,Xndeye,REJECT
   #- RULE-SET,Dustin,REJECT
@@ -280,9 +280,9 @@ rule-providers:
   #Xndeye:   {type: http, format: mrs, interval: 86400, behavior: domain, url: "https://raw.githubusercontent.com/xndeye/rule-merger/refs/heads/release/reject.mrs", path: ./ruleset/xndeye.mrs}
   #Hagezi:   {type: http, format: mrs, interval: 86400, behavior: domain, url: "https://cdn.jsdelivr.net/gh/MiHomoer/MiHomo-Hagezi@release/HageziUltimate.mrs", path: ./ruleset/hagezi.mrs}
   #adrules:  {type: http, format: mrs, interval: 86400, behavior: domain, url: "https://adrules.top/adrules-mihomo.mrs", path: ./ruleset/adrules.mrs}
-  Quixotic: {type: http, format: mrs, interval: 86400, behavior: domain, url: "https://raw.githubusercontent.com/QuixoticHeart/rule-set/refs/heads/ruleset/meta/domain/adrules.mrs", path: ./ruleset/quixotic.mrs}
+  #Quixotic: {type: http, format: mrs, interval: 86400, behavior: domain, url: "https://raw.githubusercontent.com/QuixoticHeart/rule-set/refs/heads/ruleset/meta/domain/adrules.mrs", path: ./ruleset/quixotic.mrs}
   QRuWGQ:   {type: http, format: mrs, interval: 86400, behavior: domain, url: "https://raw.githubusercontent.com/qRuWGQ/rules/refs/heads/main/rules/mihomo/adblock.mrs", path: ./ruleset/qRuWGQ.mrs}
-  Johnson:  {type: http, format: mrs, interval: 86400, behavior: domain, url: "https://ruleset.ihtw.moe/resources/rules/ADs_merged.mrs", path: ./ruleset/Johnson.mrs}
+  #Johnson:  {type: http, format: mrs, interval: 86400, behavior: domain, url: "https://ruleset.ihtw.moe/resources/rules/ADs_merged.mrs", path: ./ruleset/Johnson.mrs}
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ AI 服务 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   openai:   {type: http, format: mrs, interval: 86400, behavior: domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/openai.mrs", path: ./ruleset/openai.mrs}
   claude:   {type: http, format: mrs, interval: 86400, behavior: domain, url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/anthropic.mrs", path: ./ruleset/claude.mrs}
