@@ -3,8 +3,8 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - '.github/workflows/opnm.yml'
-      - 'files/**'
+      #- '.github/workflows/opnm.yml'
+      #- 'files/**'
 env:
   OPENWRT_VERSION: "25.12.2"
   TARGET: "mediatek/filogic"
@@ -139,8 +139,8 @@ jobs:
               odhcpd-ipv6only ppp ppp-mod-pppoe procd-ujail uboot-envtools \
               uci uclient-fetch urandom-seed urngd wpad-basic-mbedtls \
               kmod-mt7915e kmod-mt7981-firmware mt7981-wo-firmware luci \
-              openssh-sftp-server zoneinfo-asia luci-i18n-base-zh-cn  \
-              luci-i18n-nikki-zh-cn luci-i18n-momo-zh-cn luci-i18n-v2raya-zh-cn" \
+              openssh-sftp-server zoneinfo-asia luci-i18n-base-zh-cn luci-i18n-firewall-zh-cn luci-i18n-package-manager-zh-cn\
+              luci-i18n-nikki-zh-cn luci-i18n-momo-zh-cn " \
             FILES="../files"
           OUTDIR="bin/targets/mediatek/filogic"
           ORIG_NAME="openwrt-${OPENWRT_VERSION}-mediatek-filogic-qihoo_360t7-squashfs-sysupgrade.itb"
