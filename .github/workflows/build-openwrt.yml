@@ -4,8 +4,8 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - '.github/workflows/build-openwrt.yml'
-      - 'files/**'
+      #- '.github/workflows/build-openwrt.yml'
+      #- 'files/**'
 
 env:
   OPENWRT_VERSION: "25.12.2"
