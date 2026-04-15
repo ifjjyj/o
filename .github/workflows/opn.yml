@@ -3,8 +3,8 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - '.github/workflows/opn.yml'
-      - 'files/**'
+      #- '.github/workflows/opn.yml'
+      #- 'files/**'
 env:
   OPENWRT_VERSION: "25.12.2"
   TARGET: "mediatek/filogic"
