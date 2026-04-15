@@ -12,5 +12,5 @@ config timeserver 'ntp'
 	option enabled '1'
 	option enable_server '0'
 	list server 'ntp.aliyun.com'
-	list server 'cn.ntp.org.cn'
+	list server 'ntp.tencent.com'
 
