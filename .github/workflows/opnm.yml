@@ -19,7 +19,6 @@ jobs:
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4.2.2
-
       - name: 🔧 Install dependencies
         run: |
           sudo apt-get update -qq
@@ -28,14 +27,12 @@ jobs:
             gettext libssl-dev xsltproc rsync wget unzip python3 \
             qemu-utils u-boot-tools squashfs-tools device-tree-compiler \
             fakeroot
-
       - name: 💾 Cache ImageBuilder
         id: cache-imagebuilder
         uses: actions/cache@v4
         with:
           path: imagebuilder
           key: imagebuilder-${{ env.OPENWRT_VERSION }}-mediatek-filogic
-
       - name: 📦 Download ImageBuilder (cache miss only)
         if: steps.cache-imagebuilder.outputs.cache-hit != 'true'
         run: |
@@ -44,7 +41,6 @@ jobs:
             "https://downloads.openwrt.org/releases/${OPENWRT_VERSION}/targets/${TARGET}/${BUILDER}.tar.zst"
           tar --zstd -xf "${BUILDER}.tar.zst"
           mv "${BUILDER}" imagebuilder
-
       - name: ✔️ Confirm ImageBuilder ready
         run: |
           if [ "${{ steps.cache-imagebuilder.outputs.cache-hit }}" = "true" ]; then
@@ -52,7 +48,6 @@ jobs:
           else
             echo "✅ ImageBuilder 新鲜下载（版本 ${OPENWRT_VERSION}）"
           fi
-
       - name: 🔌 Setup nikki feed
         run: |
           set -euo pipefail
@@ -69,7 +64,6 @@ jobs:
           [ -z "${REPO_CONF}" ] && { echo "❌ 未找到 repositories 配置文件"; exit 1; }
           echo "${NIKKI_FEED_URL}" >> "${REPO_CONF}"
           echo ">>> nikki feed 注册完成 ✅"
-
       - name: 🔌 Setup momo feed
         run: |
           set -euo pipefail
@@ -106,7 +100,6 @@ jobs:
           echo ">>> 注册后 repositories 内容："
           cat "${REPO_CONF}"
           echo ">>> momo feed 注册完成 ✅"
-
       - name: 🔍 Verify profile exists
         run: |
           cd imagebuilder
@@ -114,7 +107,6 @@ jobs:
             echo "❌ Profile '${PROFILE}' 不存在"
             make info
             exit 1; }
-
       - name: 🏷️ Generate release tag
         id: tag
         run: |
@@ -126,7 +118,6 @@ jobs:
           echo "filename=${FILENAME}" >> "$GITHUB_OUTPUT"
           echo ">>> Release tag: ${TAG}"
           echo ">>> Firmware filename: ${FILENAME}"
-
       - name: 🏗️ Build firmware
         run: |
           set -euo pipefail
@@ -148,10 +139,8 @@ jobs:
               odhcpd-ipv6only ppp ppp-mod-pppoe procd-ujail uboot-envtools \
               uci uclient-fetch urandom-seed urngd wpad-basic-mbedtls \
               kmod-mt7915e kmod-mt7981-firmware mt7981-wo-firmware luci \
-              openssh-sftp-server zoneinfo-asia kmod-nft-offload kmod-nft-socket kmod-nft-tproxy kmod-tun \
-              kmod-inet-diag ip-full kmod-dummy kmod-tcp-bbr sing-box \
-              luci-i18n-base-zh-cn luci-i18n-firewall-zh-cn \
-              luci-i18n-package-manager-zh-cn luci-i18n-nikki-zh-cn luci-i18n-momo-zh-cn" \
+              openssh-sftp-server zoneinfo-asia luci-i18n-base-zh-cn  \
+              luci-i18n-nikki-zh-cn luci-i18n-momo-zh-cn luci-i18n-v2raya-zh-cn" \
             FILES="../files"
           OUTDIR="bin/targets/mediatek/filogic"
           ORIG_NAME="openwrt-${OPENWRT_VERSION}-mediatek-filogic-qihoo_360t7-squashfs-sysupgrade.itb"
@@ -165,7 +154,6 @@ jobs:
             ls -lh "${OUTDIR}/"
             exit 1
           fi
-
       - name: ✅ Verify output
         run: |
           cd imagebuilder
@@ -175,7 +163,6 @@ jobs:
           ls -lh "${OUTDIR}/"
           cat "${OUTDIR}/sha256sums"
           echo "✅ 固件构建成功：$(basename "${SYSUPGRADE}")"
-
       - name: 📝 Generate release notes
         id: notes
         run: |
@@ -196,7 +183,6 @@ jobs:
           | SHA256 | \`${SHA256}\` |
           EOF
           echo "notes_file=/tmp/release_notes.md" >> "$GITHUB_OUTPUT"
-
       - name: 🚀 Create GitHub Release
         uses: softprops/action-gh-release@v2.3.2
         with:
