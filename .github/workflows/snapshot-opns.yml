@@ -40,7 +40,7 @@ jobs:
             odhcpd-ipv6only ppp ppp-mod-pppoe procd-ujail uboot-envtools \
             uci uclient-fetch urandom-seed urngd wpad-basic-mbedtls \
             kmod-mt7915e kmod-mt7981-firmware mt7981-wo-firmware luci \
-            openssh-sftp-server zoneinfo-asia kmod-nft-offload kmod-nft-socket kmod-nft-tproxy kmod-tun \
+            kmod-nft-queue openssh-sftp-server zoneinfo-asia kmod-nft-offload kmod-nft-socket kmod-nft-tproxy kmod-tun \
             kmod-inet-diag ip-full kmod-dummy kmod-tcp-bbr sing-box \
             luci-i18n-base-zh-cn luci-i18n-firewall-zh-cn \
             luci-i18n-package-manager-zh-cn luci-i18n-nikki-zh-cn"
