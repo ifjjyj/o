@@ -1,0 +1,241 @@
+name: 360T7 opnms
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      #- '.github/workflows/opnms.yml'
+      #- 'files/**'
+env:
+  OPENWRT_VERSION: "25.12.2"
+  TARGET: "mediatek/filogic"
+  PROFILE: "qihoo_360t7"
+  ARCH: "aarch64_cortex-a53"
+  SINGBOX_VERSION: "1.13.8"
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4.2.2
+
+      - name: 🔧 Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y \
+            build-essential libncurses-dev zlib1g-dev gawk \
+            gettext libssl-dev xsltproc rsync wget unzip python3 \
+            qemu-utils u-boot-tools squashfs-tools device-tree-compiler \
+            fakeroot
+
+      - name: 💾 Cache ImageBuilder
+        id: cache-imagebuilder
+        uses: actions/cache@v4
+        with:
+          path: imagebuilder
+          key: imagebuilder-${{ env.OPENWRT_VERSION }}-mediatek-filogic
+
+      - name: 📦 Download ImageBuilder (cache miss only)
+        if: steps.cache-imagebuilder.outputs.cache-hit != 'true'
+        run: |
+          BUILDER="openwrt-imagebuilder-${OPENWRT_VERSION}-mediatek-filogic.Linux-x86_64"
+          wget --progress=bar:force \
+            "https://downloads.openwrt.org/releases/${OPENWRT_VERSION}/targets/${TARGET}/${BUILDER}.tar.zst"
+          tar --zstd -xf "${BUILDER}.tar.zst"
+          mv "${BUILDER}" imagebuilder
+
+      - name: ✔️ Confirm ImageBuilder ready
+        run: |
+          if [ "${{ steps.cache-imagebuilder.outputs.cache-hit }}" = "true" ]; then
+            echo "✅ ImageBuilder 来自缓存（版本 ${OPENWRT_VERSION}）"
+          else
+            echo "✅ ImageBuilder 新鲜下载（版本 ${OPENWRT_VERSION}）"
+          fi
+
+      - name: 🔌 Setup nikki feed
+        run: |
+          set -euo pipefail
+          NIKKI_BASE="https://nikkinikki.pages.dev"
+          OPENWRT_BRANCH="openwrt-${OPENWRT_VERSION%.*}"
+          NIKKI_FEED_URL="${NIKKI_BASE}/${OPENWRT_BRANCH}/${ARCH}/nikki/packages.adb"
+          APK_KEYS_DIR=$(find imagebuilder -path "*/apk/keys" -type d | head -1)
+          [ -z "${APK_KEYS_DIR}" ] && APK_KEYS_DIR=$(find imagebuilder -name "keys" -type d | head -1)
+          [ -z "${APK_KEYS_DIR}" ] && { echo "❌ 未找到 keys 目录"; exit 1; }
+          wget -q "${NIKKI_BASE}/public-key.pem" -O "${APK_KEYS_DIR}/nikki.pem" || {
+            echo "❌ nikki 公钥下载失败"; exit 1; }
+          REPO_CONF=$(find imagebuilder -maxdepth 2 -name "repositories.conf" | head -1)
+          [ -z "${REPO_CONF}" ] && REPO_CONF=$(find imagebuilder -maxdepth 2 -name "repositories*" | head -1)
+          [ -z "${REPO_CONF}" ] && { echo "❌ 未找到 repositories 配置文件"; exit 1; }
+          echo "${NIKKI_FEED_URL}" >> "${REPO_CONF}"
+          echo ">>> nikki feed 注册完成 ✅"
+
+      - name: 🔌 Setup momo feed
+        run: |
+          set -euo pipefail
+          MOMO_BASE="https://momomomo.pages.dev"
+          OPENWRT_BRANCH="openwrt-${OPENWRT_VERSION%.*}"
+          MOMO_FEED_URL="${MOMO_BASE}/${OPENWRT_BRANCH}/${ARCH}/momo/packages.adb"
+          # 1. 安装 momo 签名公钥
+          echo ">>> [1/2] 安装 momo 签名公钥..."
+          APK_KEYS_DIR=$(find imagebuilder -path "*/apk/keys" -type d | head -1)
+          if [ -z "${APK_KEYS_DIR}" ]; then
+            APK_KEYS_DIR=$(find imagebuilder -name "keys" -type d | head -1)
+          fi
+          if [ -z "${APK_KEYS_DIR}" ]; then
+            echo "❌ 未找到任何 keys 目录"; exit 1
+          fi
+          echo ">>> keys 目录：${APK_KEYS_DIR}"
+          wget -q "${MOMO_BASE}/public-key.pem" \
+               -O "${APK_KEYS_DIR}/momo.pem"
+          echo ">>> 公钥已安装 ✅"
+          # 2. 注册 momo feed
+          echo ">>> [2/2] 注册 momo feed..."
+          REPO_CONF=$(find imagebuilder -maxdepth 2 \
+                      -name "repositories.conf" | head -1)
+          if [ -z "${REPO_CONF}" ]; then
+            REPO_CONF=$(find imagebuilder -maxdepth 2 \
+                        -name "repositories*" | head -1)
+          fi
+          if [ -z "${REPO_CONF}" ]; then
+            echo "❌ 未找到 repositories 配置文件"; exit 1
+          fi
+          echo ">>> 配置文件：${REPO_CONF}"
+          echo ">>> feed URL：${MOMO_FEED_URL}"
+          echo "${MOMO_FEED_URL}" >> "${REPO_CONF}"
+          echo ">>> 注册后 repositories 内容："
+          cat "${REPO_CONF}"
+          echo ">>> momo feed 注册完成 ✅"
+
+      - name: 📥 Inject sing-box ${{ env.SINGBOX_VERSION }} binary
+        run: |
+          set -euo pipefail
+          APK_URL="https://github.com/SagerNet/sing-box/releases/download/v${SINGBOX_VERSION}/sing-box_${SINGBOX_VERSION}_openwrt_${ARCH}.apk"
+          echo ">>> 下载 sing-box ${SINGBOX_VERSION} apk..."
+          wget -q "${APK_URL}" -O /tmp/singbox-new.apk
+          echo ">>> 解包 apk（OpenWrt apk = gzip tar 格式）..."
+          mkdir -p /tmp/sb-ext
+          # OpenWrt APK 本质是 gzip tar，直接解压
+          tar -xzf /tmp/singbox-new.apk -C /tmp/sb-ext 2>/dev/null || true
+          # 备用：部分 apk 可能是 zip 格式
+          if [ ! -f "$(find /tmp/sb-ext -name 'sing-box' -type f | head -1)" ]; then
+            echo ">>> tar 解包未找到二进制，尝试 unzip..."
+            rm -rf /tmp/sb-ext && mkdir -p /tmp/sb-ext
+            unzip -q /tmp/singbox-new.apk -d /tmp/sb-ext || true
+          fi
+          BINARY=$(find /tmp/sb-ext -name "sing-box" -type f | head -1)
+          if [ -z "${BINARY}" ]; then
+            echo "❌ 在 apk 包内未找到 sing-box 二进制"
+            echo ">>> 包内文件列表："
+            find /tmp/sb-ext
+            exit 1
+          fi
+          echo ">>> 找到二进制：${BINARY}"
+          # 写入 files/ 覆盖层
+          mkdir -p files/usr/bin
+          cp "${BINARY}" files/usr/bin/sing-box
+          chmod +x files/usr/bin/sing-box
+          # 验证：打印版本（如果可以在宿主机执行，否则只打印文件信息）
+          VER_OUT=$(files/usr/bin/sing-box version 2>/dev/null || echo "（宿主机架构不同，无法直接运行，文件已就位）")
+          echo ">>> ${VER_OUT}"
+          ls -lh files/usr/bin/sing-box
+          echo "✅ sing-box ${SINGBOX_VERSION} 已注入 files/usr/bin/sing-box"
+
+      - name: 🔍 Verify profile exists
+        run: |
+          cd imagebuilder
+          make info | grep -A3 "${PROFILE}" || {
+            echo "❌ Profile '${PROFILE}' 不存在"
+            make info
+            exit 1; }
+
+      - name: 🏷️ Generate release tag
+        id: tag
+        run: |
+          DATETIME=$(date -u '+%Y%m%d')
+          RUN_NUM="${{ github.run_number }}"
+          TAG="${DATETIME}-${RUN_NUM}"
+          FILENAME="openwrt-${OPENWRT_VERSION}-360t7-opns-${TAG}.itb"
+          echo "tag=${TAG}"           >> "$GITHUB_OUTPUT"
+          echo "filename=${FILENAME}" >> "$GITHUB_OUTPUT"
+          echo ">>> Release tag: ${TAG}"
+          echo ">>> Firmware filename: ${FILENAME}"
+
+      - name: 🏗️ Build firmware
+        run: |
+          set -euo pipefail
+          cd imagebuilder
+          APK_REAL=$(find "$(pwd)" -name "apk" -type f -executable ! -path "/tmp/*" | head -1)
+          [ -z "${APK_REAL}" ] && { echo "❌ 未找到 apk 二进制"; exit 1; }
+          mkdir -p /tmp/apk-wrapper
+          printf '#!/bin/sh\nexec "%s" --allow-untrusted "$@"\n' "${APK_REAL}" > /tmp/apk-wrapper/apk
+          chmod +x /tmp/apk-wrapper/apk
+          export PATH="/tmp/apk-wrapper:${PATH}"
+          echo ">>> 开始构建固件，时间: $(date)"
+          make image \
+            APK="/tmp/apk-wrapper/apk" \
+            PROFILE="${PROFILE}" \
+            PACKAGES="apk-mbedtls base-files ca-bundle dnsmasq-full dropbear firewall4 fitblk fstools kmod-crypto-hw-safexcel kmod-gpio-button-hotplug \
+              kmod-leds-gpio libc libgcc libustream-mbedtls logd mtd netifd nftables odhcp6c odhcpd-ipv6only ppp ppp-mod-pppoe procd-ujail uboot-envtools \
+              uci uclient-fetch urandom-seed urngd wpad-basic-mbedtls kmod-mt7915e kmod-mt7981-firmware mt7981-wo-firmware luci \
+              openssh-sftp-server zoneinfo-asia luci-i18n-base-zh-cn luci-i18n-firewall-zh-cn luci-i18n-package-manager-zh-cn \
+              luci-i18n-nikki-zh-cn luci-i18n-momo-zh-cn " \
+            FILES="../files"
+          OUTDIR="bin/targets/mediatek/filogic"
+          ORIG_NAME="openwrt-${OPENWRT_VERSION}-mediatek-filogic-qihoo_360t7-squashfs-sysupgrade.itb"
+          SHORT_NAME="${{ steps.tag.outputs.filename }}"
+          if [ -f "${OUTDIR}/${ORIG_NAME}" ]; then
+            mv "${OUTDIR}/${ORIG_NAME}" "${OUTDIR}/${SHORT_NAME}"
+            sed -i "s/${ORIG_NAME}/${SHORT_NAME}/g" "${OUTDIR}/sha256sums"
+            echo ">>> 已重命名为：${SHORT_NAME} ✅"
+          else
+            echo "❌ 未找到原始固件：${ORIG_NAME}"
+            ls -lh "${OUTDIR}/"
+            exit 1
+          fi
+
+      - name: ✅ Verify output
+        run: |
+          cd imagebuilder
+          OUTDIR="bin/targets/mediatek/filogic"
+          SYSUPGRADE=$(ls "${OUTDIR}"/*.itb 2>/dev/null | head -1)
+          [ -z "${SYSUPGRADE}" ] && { echo "❌ 未找到固件"; exit 1; }
+          ls -lh "${OUTDIR}/"
+          cat "${OUTDIR}/sha256sums"
+          echo "✅ 固件构建成功：$(basename "${SYSUPGRADE}")"
+
+      - name: 📝 Generate release notes
+        id: notes
+        run: |
+          cd imagebuilder
+          OUTDIR="bin/targets/mediatek/filogic"
+          FILENAME="${{ steps.tag.outputs.filename }}"
+          FIRMWARE="${OUTDIR}/${FILENAME}"
+          SHA256=$(grep "${FILENAME}" "${OUTDIR}/sha256sums" | awk '{print $1}')
+          FILESIZE=$(ls -lh "${FIRMWARE}" | awk '{print $5}')
+          BUILD_TIME=$(date -u '+%Y-%m-%d %H:%M UTC')
+          cat > /tmp/release_notes.md << EOF
+          ### 固件信息
+          | 项目 | 值 |
+          |------|-----|
+          | OpenWrt 版本 | ${OPENWRT_VERSION} |
+          | sing-box 版本 | ${SINGBOX_VERSION}（覆盖 nikki 内置版本） |
+          | 构建时间 | ${BUILD_TIME} |
+          | 文件大小 | ${FILESIZE} |
+          | SHA256 | \`${SHA256}\` |
+          EOF
+          echo "notes_file=/tmp/release_notes.md" >> "$GITHUB_OUTPUT"
+
+      - name: 🚀 Create GitHub Release
+        uses: softprops/action-gh-release@v2.3.2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: "OpenWrt ${{ env.OPENWRT_VERSION }} for 360T7 · ${{ steps.tag.outputs.tag }}"
+          body_path: ${{ steps.notes.outputs.notes_file }}
+          draft: false
+          prerelease: false
+          files: |
+            imagebuilder/bin/targets/mediatek/filogic/${{ steps.tag.outputs.filename }}
+            imagebuilder/bin/targets/mediatek/filogic/sha256sums
+          fail_on_unmatched_files: true
