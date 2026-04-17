@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
   push:
     paths:
-      #- '.github/workflows/snapshot-opns.yml'
+      - '.github/workflows/snapshot-opns.yml'
       #- 'files/**'
 env:
   OPENWRT_VERSION: "SNAPSHOT"
