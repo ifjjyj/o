@@ -1,4 +1,3 @@
-
 config wifi-device 'radio0'
 	option type 'mac80211'
 	option path 'platform/soc/18000000.wifi'
@@ -7,7 +6,6 @@ config wifi-device 'radio0'
 	option htmode 'HT40'
 	option country 'US'
 	option disabled '1'
-
 config wifi-iface 'default_radio0'
 	option device 'radio0'
 	option network 'lan'
@@ -16,7 +14,6 @@ config wifi-iface 'default_radio0'
 	option encryption 'sae-mixed'
 	option disabled '1'
 	option key '735735735'
-
 config wifi-device 'radio1'
 	option type 'mac80211'
 	option path 'platform/soc/18000000.wifi+1'
@@ -24,7 +21,6 @@ config wifi-device 'radio1'
 	option channel '149'
 	option htmode 'HE80'
 	option country 'US'
-
 config wifi-iface 'default_radio1'
 	option device 'radio1'
 	option network 'lan'
@@ -33,4 +29,3 @@ config wifi-iface 'default_radio1'
 	option encryption 'sae-mixed'
 	option disabled '0'
 	option key '776776776'
-
