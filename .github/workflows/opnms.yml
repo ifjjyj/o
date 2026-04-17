@@ -108,12 +108,41 @@ jobs:
           cat "${REPO_CONF}"
           echo ">>> momo feed 注册完成 ✅"
 
+      # ---------------------------------------------------------------
+      # ★ 新增：下载 sing-box 二进制并注入 files/usr/bin/
+      #
+      # 原理：ImageBuilder 的 FILES="../files" 参数会把 files/ 目录的
+      # 内容逐文件叠加（覆盖）到最终 rootfs 上。
+      # 因此把新版二进制放到 files/usr/bin/sing-box，
+      # 就会替换掉 nikki 包安装的旧版本。
+      #
+      # 注意：不使用 OpenWrt .apk 包（Alpine APKv2 多段 gzip 格式难以
+      # 在宿主机直接解包）；改用官方 linux_arm64 标准 tar.gz，
+      # 二进制完全相同（均为静态编译 aarch64 ELF），解包更可靠。
+      # ---------------------------------------------------------------
       - name: 📥 Inject sing-box ${{ env.SINGBOX_VERSION }} binary
         run: |
           set -euo pipefail
-          # 用标准 Linux arm64 tarball，格式是普通 gzip tar，直接可解
-          TAR_URL="https://github.com/SagerNet/sing-box/releases/download/v${SINGBOX_VERSION}/sing-box_${SINGBOX_VERSION}_linux_arm64.tar.gz"
-          echo ">>> 下载 sing-box ${SINGBOX_VERSION} linux_arm64 tarball..."
+          echo ">>> 查询 sing-box v${SINGBOX_VERSION} 的实际 release assets..."
+          # 用 GitHub API 动态获取 asset 列表，避免硬编码文件名出错
+          API_URL="https://api.github.com/repos/SagerNet/sing-box/releases/tags/v${SINGBOX_VERSION}"
+          ASSETS=$(curl -sf "${API_URL}" | grep '"browser_download_url"' | grep -v '\.apk' | awk -F'"' '{print $4}')
+          if [ -z "${ASSETS}" ]; then
+            echo "❌ 无法获取 release assets，请确认版本 v${SINGBOX_VERSION} 是否存在"
+            echo ">>> API 响应："
+            curl -s "${API_URL}" | head -30
+            exit 1
+          fi
+          echo ">>> 所有可用 assets："
+          echo "${ASSETS}"
+          # 优先匹配 linux_arm64，其次 linux_aarch64
+          TAR_URL=$(echo "${ASSETS}" | grep -E 'linux_arm64.*\.tar\.gz$' | head -1)
+          [ -z "${TAR_URL}" ] && TAR_URL=$(echo "${ASSETS}" | grep -E 'linux_aarch64.*\.tar\.gz$' | head -1)
+          if [ -z "${TAR_URL}" ]; then
+            echo "❌ 未找到 arm64/aarch64 tarball asset"
+            exit 1
+          fi
+          echo ">>> 下载：${TAR_URL}"
           wget -q "${TAR_URL}" -O /tmp/singbox.tar.gz
           mkdir -p /tmp/sb-ext
           tar -xzf /tmp/singbox.tar.gz -C /tmp/sb-ext
@@ -123,6 +152,7 @@ jobs:
             find /tmp/sb-ext
             exit 1
           fi
+          echo ">>> 找到二进制：${BINARY}"
           mkdir -p files/usr/bin
           cp "${BINARY}" files/usr/bin/sing-box
           chmod +x files/usr/bin/sing-box
