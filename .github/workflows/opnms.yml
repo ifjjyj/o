@@ -111,34 +111,21 @@ jobs:
       - name: 📥 Inject sing-box ${{ env.SINGBOX_VERSION }} binary
         run: |
           set -euo pipefail
-          APK_URL="https://github.com/SagerNet/sing-box/releases/download/v${SINGBOX_VERSION}/sing-box_${SINGBOX_VERSION}_openwrt_${ARCH}.apk"
-          echo ">>> 下载 sing-box ${SINGBOX_VERSION} apk..."
-          wget -q "${APK_URL}" -O /tmp/singbox-new.apk
-          echo ">>> 解包 apk（OpenWrt apk = gzip tar 格式）..."
+          # 用标准 Linux arm64 tarball，格式是普通 gzip tar，直接可解
+          TAR_URL="https://github.com/SagerNet/sing-box/releases/download/v${SINGBOX_VERSION}/sing-box_${SINGBOX_VERSION}_linux_arm64.tar.gz"
+          echo ">>> 下载 sing-box ${SINGBOX_VERSION} linux_arm64 tarball..."
+          wget -q "${TAR_URL}" -O /tmp/singbox.tar.gz
           mkdir -p /tmp/sb-ext
-          # OpenWrt APK 本质是 gzip tar，直接解压
-          tar -xzf /tmp/singbox-new.apk -C /tmp/sb-ext 2>/dev/null || true
-          # 备用：部分 apk 可能是 zip 格式
-          if [ ! -f "$(find /tmp/sb-ext -name 'sing-box' -type f | head -1)" ]; then
-            echo ">>> tar 解包未找到二进制，尝试 unzip..."
-            rm -rf /tmp/sb-ext && mkdir -p /tmp/sb-ext
-            unzip -q /tmp/singbox-new.apk -d /tmp/sb-ext || true
-          fi
+          tar -xzf /tmp/singbox.tar.gz -C /tmp/sb-ext
           BINARY=$(find /tmp/sb-ext -name "sing-box" -type f | head -1)
           if [ -z "${BINARY}" ]; then
-            echo "❌ 在 apk 包内未找到 sing-box 二进制"
-            echo ">>> 包内文件列表："
+            echo "❌ tarball 内未找到 sing-box 二进制"
             find /tmp/sb-ext
             exit 1
           fi
-          echo ">>> 找到二进制：${BINARY}"
-          # 写入 files/ 覆盖层
           mkdir -p files/usr/bin
           cp "${BINARY}" files/usr/bin/sing-box
           chmod +x files/usr/bin/sing-box
-          # 验证：打印版本（如果可以在宿主机执行，否则只打印文件信息）
-          VER_OUT=$(files/usr/bin/sing-box version 2>/dev/null || echo "（宿主机架构不同，无法直接运行，文件已就位）")
-          echo ">>> ${VER_OUT}"
           ls -lh files/usr/bin/sing-box
           echo "✅ sing-box ${SINGBOX_VERSION} 已注入 files/usr/bin/sing-box"
 
