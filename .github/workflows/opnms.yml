@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
   push:
     paths:
-      #- '.github/workflows/opnms.yml'
+      - '.github/workflows/opnms.yml'
       #- 'files/**'
 env:
   OPENWRT_VERSION: "25.12.2"
