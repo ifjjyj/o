@@ -101,18 +101,13 @@ jobs:
           echo ">>> 注册后 repositories 内容："
           cat "${REPO_CONF}"
           echo ">>> momo feed 注册完成 ✅"
+
+
+
       - name: 📥 Inject sing-box ${{ env.SINGBOX_VERSION }} binary
         run: |
           set -euo pipefail
-          API_URL="https://api.github.com/repos/SagerNet/sing-box/releases/tags/v${SINGBOX_VERSION}"
-          ASSETS=$(curl -sf "${API_URL}" | grep '"browser_download_url"' | awk -F'"' '{print $4}')
-          [ -z "${ASSETS}" ] && { echo "❌ 无法获取 release assets"; exit 1; }
-          TAR_URL=$(echo "${ASSETS}" | grep -E 'linux-mipsle-softfloat\.tar\.gz$' | head -1)
-          [ -z "${TAR_URL}" ] && TAR_URL=$(echo "${ASSETS}" | grep -E 'linux_aarch64\.tar\.gz$' | head -1)
-          if [ -z "${TAR_URL}" ]; then
-            echo "❌ 未找到 arm64/aarch64 tarball asset"
-            exit 1
-          fi
+          TAR_URL="https://github.com/SagerNet/sing-box/releases/download/v${SINGBOX_VERSION}/sing-box-${SINGBOX_VERSION}-linux-arm64-musl.tar.gz"
           echo ">>> 下载：${TAR_URL}"
           wget -q "${TAR_URL}" -O /tmp/singbox.tar.gz
           mkdir -p /tmp/sb-ext
@@ -128,7 +123,7 @@ jobs:
           cp "${BINARY}" files/usr/bin/sing-box
           chmod +x files/usr/bin/sing-box
           ls -lh files/usr/bin/sing-box
-          echo "✅ sing-box ${SINGBOX_VERSION} 已注入 files/usr/bin/sing-box"
+          echo "✅ sing-box ${SINGBOX_VERSION} (musl) 已注入 files/usr/bin/sing-box"
       - name: 🔍 Verify profile exists
         run: |
           cd imagebuilder
