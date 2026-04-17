@@ -30,7 +30,7 @@ redir-port: 7892                                    # 透明代理端口（redir
 tproxy-port: 7893                                   # 透明代理端口（tproxy，支持 TCP+UDP，仅 Linux）
 mixed-port: 1080                                    # 混合代理端口（同时支持 HTTP 和 SOCKS5）
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 认证 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-interface-name: wan                                 # 流量出站网卡，多网卡设备建议手动指定，单网卡可不填
+#interface-name: wan                                 # 流量出站网卡，多网卡设备建议手动指定，单网卡可不填
 bind-address: "*"                                   # 监听地址，"*" 绑定所有IP，也可指定单个 IPv4/IPv6 地址
 allow-lan: true                                     # [true/false] 允许局域网设备通过本机代理上网
 authentication: ["mihomo:my14285700@@"]             # http,socks 入口的验证用户名，密码
@@ -99,7 +99,7 @@ tun:
   gso-max-size: 65536                                  # GSO 数据块最大长度，通用分段卸载包的最大大小
   udp-timeout: 300                                     # UDP NAT 超时时间，单位秒，默认 300（5分钟）
   #route-exclude-cidr: ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16","127.0.0.0/8", "169.254.0.0/16", "224.0.0.0/4","fc00::/7", "fe80::/10"] #不走TUN
-  route-exclude-address-set: ["cn_ip"]                 # 这些规则集匹配的 IP 不走 TUN（直接走物理网卡）
+  route-exclude-address-set: ["cn_ip", "pv_ip"]        # 这些规则集匹配的 IP 不走 TUN（直接走物理网卡）
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ DNS ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 dns:
   enable: true                                          # [true/false] 启用内置 DNS 服务，false 则使用系统 DNS
