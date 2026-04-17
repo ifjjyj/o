@@ -1,47 +1,36 @@
-
 config interface 'loopback'
 	option device 'lo'
 	option proto 'static'
 	list ipaddr '127.0.0.1/8'
-
 config globals 'globals'
 	option dhcp_default_duid '00043a40c388a67948ceaacec60d9a39f0a6'
-
 config device
 	option name 'br-lan'
 	option type 'bridge'
 	list ports 'lan1'
 	list ports 'lan2'
 	list ports 'lan3'
-
 config device
 	option name 'lan1'
 	option macaddr '34:47:d4:87:86:d2'
-
 config device
 	option name 'lan2'
 	option macaddr '34:47:d4:87:86:d2'
-
 config device
 	option name 'lan3'
 	option macaddr '34:47:d4:87:86:d2'
-
 config interface 'lan'
 	option device 'br-lan'
 	option proto 'static'
 	option ipaddr '10.0.0.1/24'
 	option ip6assign '64'
-
 config device
 	option name 'wan'
 	option macaddr '34:47:d4:87:86:d3'
-
 config interface 'wan'
 	option device 'wan'
 	option proto 'dhcp'
-
 config interface 'wan6'
 	option device 'wan'
 	option proto 'dhcpv6'
 	option reqaddress 'force'
-
