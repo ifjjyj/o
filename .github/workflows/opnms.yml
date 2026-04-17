@@ -20,7 +20,6 @@ jobs:
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4.2.2
-
       - name: 🔧 Install dependencies
         run: |
           sudo apt-get update -qq
@@ -108,7 +107,7 @@ jobs:
           API_URL="https://api.github.com/repos/SagerNet/sing-box/releases/tags/v${SINGBOX_VERSION}"
           ASSETS=$(curl -sf "${API_URL}" | grep '"browser_download_url"' | awk -F'"' '{print $4}')
           [ -z "${ASSETS}" ] && { echo "❌ 无法获取 release assets"; exit 1; }
-          TAR_URL=$(echo "${ASSETS}" | grep -E 'linux-arm64.*\.tar\.gz$' | head -1)
+          TAR_URL=$(echo "${ASSETS}" | grep -E 'linux-arm64\.tar\.gz$' | head -1)
           [ -z "${TAR_URL}" ] && TAR_URL=$(echo "${ASSETS}" | grep -E 'linux_aarch64\.tar\.gz$' | head -1)
           if [ -z "${TAR_URL}" ]; then
             echo "❌ 未找到 arm64/aarch64 tarball asset"
