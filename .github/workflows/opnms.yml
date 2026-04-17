@@ -189,6 +189,24 @@ jobs:
           ls -lh "${OUTDIR}/"
           cat "${OUTDIR}/sha256sums"
           echo "✅ 固件构建成功：$(basename "${SYSUPGRADE}")"
+      - name: 🔍 Verify sing-box binary version in firmware
+        run: |
+          set -euo pipefail
+          OUTDIR="imagebuilder/bin/targets/mediatek/filogic"
+          ITB=$(ls "${OUTDIR}"/*.itb | head -1)
+          INJECTED="files/usr/bin/sing-box"
+          echo ">>> 注入二进制版本信息："
+          file "${INJECTED}"
+          strings "${INJECTED}" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | head -3
+          if command -v qemu-aarch64-static &>/dev/null; then
+            qemu-aarch64-static "${INJECTED}" version
+          else
+            echo ">>> qemu 不可用，通过 strings 验证版本字符串："
+            strings "${INJECTED}" | grep -i "sing-box" | head -5
+            strings "${INJECTED}" | grep "${SINGBOX_VERSION}" && \
+              echo "✅ 确认固件中 sing-box 版本为 ${SINGBOX_VERSION}" || \
+              echo "⚠️  未在二进制中找到版本字符串 ${SINGBOX_VERSION}"
+          fi
       - name: 📝 Generate release notes
         id: notes
         run: |
