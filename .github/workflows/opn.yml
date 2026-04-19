@@ -1,9 +1,9 @@
 name: 360T7 opn
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - '.github/workflows/opn.yml'
+  #push:
+    #paths:
+      #- '.github/workflows/opn.yml'
       #- 'files/**'
 env:
   OPENWRT_VERSION: "25.12.2"
