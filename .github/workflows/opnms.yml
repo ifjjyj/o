@@ -1,9 +1,9 @@
 name: 360T7 opnms
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - '.github/workflows/opnms.yml'
+  #push:
+    #paths:
+      #- '.github/workflows/opnms.yml'
       #- 'files/**'
 env:
   OPENWRT_VERSION: "25.12.2"
