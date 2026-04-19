@@ -1,9 +1,9 @@
 name: 360T7 snapshot-opns
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - '.github/workflows/snapshot-opns.yml'
+  #push:
+    #paths:
+      #- '.github/workflows/snapshot-opns.yml'
       #- 'files/**'
 env:
   OPENWRT_VERSION: "SNAPSHOT"
