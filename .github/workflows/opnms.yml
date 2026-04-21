@@ -7,10 +7,10 @@ on:
       #- 'files/**'
 env:
   OPENWRT_VERSION: "25.12.2"
+  SINGBOX_VERSION: "1.13.9"
   TARGET: "mediatek/filogic"
   PROFILE: "qihoo_360t7"
   ARCH: "aarch64_cortex-a53"
-  SINGBOX_VERSION: "1.13.8"
 permissions:
   contents: write
 jobs:
