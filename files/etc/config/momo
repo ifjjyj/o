@@ -1,11 +1,10 @@
 config config 'config'
 	option enabled '0'
-	option profile 'file:momo1.json'
 	option start_delay '0'
 	option scheduled_restart '0'
 	option scheduled_restart_cron '0 3 * * *'
 	option test_profile '1'
-	option core_only '0'
+	option core_only '1'
 
 config procd 'procd'
 	option fast_reload '0'
