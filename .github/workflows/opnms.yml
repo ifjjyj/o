@@ -20,6 +20,7 @@ jobs:
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4.2.2
+
       - name: 🔧 Install dependencies
         run: |
           sudo apt-get update -qq
@@ -28,12 +29,14 @@ jobs:
             gettext libssl-dev xsltproc rsync wget unzip python3 \
             qemu-utils u-boot-tools squashfs-tools device-tree-compiler \
             fakeroot
+
       - name: 💾 Cache ImageBuilder
         id: cache-imagebuilder
         uses: actions/cache@v4
         with:
           path: imagebuilder
           key: imagebuilder-${{ env.OPENWRT_VERSION }}-mediatek-filogic
+
       - name: 📦 Download ImageBuilder (cache miss only)
         if: steps.cache-imagebuilder.outputs.cache-hit != 'true'
         run: |
@@ -42,6 +45,7 @@ jobs:
             "https://downloads.openwrt.org/releases/${OPENWRT_VERSION}/targets/${TARGET}/${BUILDER}.tar.zst"
           tar --zstd -xf "${BUILDER}.tar.zst"
           mv "${BUILDER}" imagebuilder
+
       - name: ✔️ Confirm ImageBuilder ready
         run: |
           if [ "${{ steps.cache-imagebuilder.outputs.cache-hit }}" = "true" ]; then
@@ -49,6 +53,7 @@ jobs:
           else
             echo "✅ ImageBuilder 新鲜下载（版本 ${OPENWRT_VERSION}）"
           fi
+
       - name: 🔌 Setup nikki feed
         run: |
           set -euo pipefail
@@ -65,6 +70,7 @@ jobs:
           [ -z "${REPO_CONF}" ] && { echo "❌ 未找到 repositories 配置文件"; exit 1; }
           echo "${NIKKI_FEED_URL}" >> "${REPO_CONF}"
           echo ">>> nikki feed 注册完成 ✅"
+
       - name: 🔌 Setup momo feed
         run: |
           set -euo pipefail
@@ -101,6 +107,7 @@ jobs:
           echo ">>> 注册后 repositories 内容："
           cat "${REPO_CONF}"
           echo ">>> momo feed 注册完成 ✅"
+
       - name: 📥 Inject sing-box ${{ env.SINGBOX_VERSION }} binary
         run: |
           set -euo pipefail
@@ -120,7 +127,64 @@ jobs:
           cp "${BINARY}" files/usr/bin/sing-box
           chmod +x files/usr/bin/sing-box
           ls -lh files/usr/bin/sing-box
-          echo "✅ sing-box ${SINGBOX_VERSION} (musl) 已注入 files/usr/bin/sing-box"
+          echo "✅ sing-box ${SINGBOX_VERSION} (musl) 已注入 files/usr/bin/sing-box（覆盖 momo 内置版本）"
+
+      - name: 📥 Inject mihomo Prerelease-Alpha binary
+        id: inject-mihomo
+        run: |
+          set -euo pipefail
+          BASE_URL="https://github.com/MetaCubeX/mihomo/releases/download/Prerelease-Alpha"
+
+          # 步骤 1：通过官方 version.txt 获取当前 Alpha 版本标识
+          # 格式示例：alpha-7f772de（branch-commithash，每次 push 后更新）
+          echo ">>> [1/4] 获取 Prerelease-Alpha 版本标识..."
+          VERSION=$(wget -qO- "${BASE_URL}/version.txt")
+          if [ -z "${VERSION}" ]; then
+            echo "❌ 无法获取 version.txt，请检查网络或上游是否有变动"
+            exit 1
+          fi
+          echo ">>> Alpha 版本标识：${VERSION}"
+
+          # 步骤 2：拼接下载 URL 并下载
+          # 360T7 为 aarch64，mihomo 命名规则为 linux-arm64（无 -compatible 后缀）
+          FILENAME="mihomo-linux-arm64-${VERSION}.gz"
+          DOWNLOAD_URL="${BASE_URL}/${FILENAME}"
+          echo ">>> [2/4] 下载：${DOWNLOAD_URL}"
+          wget -q "${DOWNLOAD_URL}" -O /tmp/mihomo.gz || {
+            echo "❌ 下载失败，URL：${DOWNLOAD_URL}"
+            exit 1
+          }
+
+          # 步骤 3：解压（gunzip 将 /tmp/mihomo.gz → /tmp/mihomo）
+          echo ">>> [3/4] 解压..."
+          gunzip -f /tmp/mihomo.gz
+          BINARY="/tmp/mihomo"
+          if [ ! -f "${BINARY}" ]; then
+            echo "❌ 解压后未找到 /tmp/mihomo，目录内容如下："
+            ls -lh /tmp/
+            exit 1
+          fi
+          chmod +x "${BINARY}"
+
+          # 步骤 4：验证二进制架构，确保为 aarch64 ELF，防止误注入错误平台文件
+          echo ">>> [4/4] 验证二进制架构..."
+          file "${BINARY}"
+          file "${BINARY}" | grep -q "aarch64" || {
+            echo "❌ 架构验证失败：该二进制不是 aarch64，请检查下载的文件"
+            exit 1
+          }
+          echo ">>> 架构验证通过 ✅"
+
+          # 注入到 files/ 目录，ImageBuilder 构建时会覆盖 nikki 包内置的旧版本
+          # 对应固件内路径：/usr/bin/mihomo（nikki 官方 FAQ 确认）
+          mkdir -p files/usr/bin
+          cp "${BINARY}" files/usr/bin/mihomo
+          ls -lh files/usr/bin/mihomo
+
+          # 将版本标识透传给后续步骤（用于 release notes）
+          echo "mihomo_version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "✅ mihomo ${VERSION} 已注入 files/usr/bin/mihomo（覆盖 nikki 内置版本）"
+
       - name: 🔍 Verify profile exists
         run: |
           cd imagebuilder
@@ -128,6 +192,7 @@ jobs:
             echo "❌ Profile '${PROFILE}' 不存在"
             make info
             exit 1; }
+
       - name: 🏷️ Generate release tag
         id: tag
         run: |
@@ -139,6 +204,7 @@ jobs:
           echo "filename=${FILENAME}" >> "$GITHUB_OUTPUT"
           echo ">>> Release tag: ${TAG}"
           echo ">>> Firmware filename: ${FILENAME}"
+
       - name: 🏗️ Build firmware
         run: |
           set -euo pipefail
@@ -171,6 +237,7 @@ jobs:
             ls -lh "${OUTDIR}/"
             exit 1
           fi
+
       - name: ✅ Verify output
         run: |
           cd imagebuilder
@@ -180,6 +247,7 @@ jobs:
           ls -lh "${OUTDIR}/"
           cat "${OUTDIR}/sha256sums"
           echo "✅ 固件构建成功：$(basename "${SYSUPGRADE}")"
+
       - name: 📝 Generate release notes
         id: notes
         run: |
@@ -190,17 +258,20 @@ jobs:
           SHA256=$(grep "${FILENAME}" "${OUTDIR}/sha256sums" | awk '{print $1}')
           FILESIZE=$(ls -lh "${FIRMWARE}" | awk '{print $5}')
           BUILD_TIME=$(date -u '+%Y-%m-%d %H:%M UTC')
+          MIHOMO_VER="${{ steps.inject-mihomo.outputs.mihomo_version }}"
           cat > /tmp/release_notes.md << EOF
           ### 固件信息
           | 项目 | 值 |
           |------|-----|
           | OpenWrt 版本 | ${OPENWRT_VERSION} |
-          | sing-box 版本 | ${SINGBOX_VERSION}（覆盖 nikki 内置版本） |
+          | sing-box 版本 | ${SINGBOX_VERSION}（覆盖 momo 内置版本） |
+          | mihomo 版本 | ${MIHOMO_VER}（覆盖 nikki 内置版本） |
           | 构建时间 | ${BUILD_TIME} |
           | 文件大小 | ${FILESIZE} |
           | SHA256 | \`${SHA256}\` |
           EOF
           echo "notes_file=/tmp/release_notes.md" >> "$GITHUB_OUTPUT"
+
       - name: 🚀 Create GitHub Release
         uses: softprops/action-gh-release@v2.3.2
         with:
