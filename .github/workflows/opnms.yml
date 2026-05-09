@@ -6,7 +6,7 @@ on:
       #- '.github/workflows/opnms.yml'
       #- 'files/**'
 env:
-  OPENWRT_VERSION: "25.12.2"
+  OPENWRT_VERSION: "25.12.3"
   SINGBOX_VERSION: "1.13.11"
   TARGET: "mediatek/filogic"
   PROFILE: "qihoo_360t7"
