@@ -11,11 +11,12 @@ env:
   TARGET: "mediatek/filogic"
   PROFILE: "qihoo_360t7"
   ARCH: "aarch64_cortex-a53"
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 permissions:
   contents: write
 jobs:
   build:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
       - name: 📥 Checkout repository
