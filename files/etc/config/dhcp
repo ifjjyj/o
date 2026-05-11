@@ -15,27 +15,19 @@ config dnsmasq
 	option ednspacket_max '1232'
 	option edns_packet_max '1232'
 	option dns_forward_max '1000'
-
 config dhcp 'lan'
 	option interface 'lan'
 	option start '100'
 	option limit '150'
 	option leasetime '12h'
 	option dhcpv4 'server'
-	option dhcpv6 'server'
-	option ra 'server'
-	option ra_slaac '1'
-	option ra_flags 'none'
-	option ndp 'disabled'
-
 config dhcp 'wan'
 	option interface 'wan'
 	option ignore '1'
-
 config odhcpd 'odhcpd'
 	option maindhcp '0'
 	option leasefile '/tmp/odhcpd.leases'
 	option leasetrigger '/usr/sbin/odhcpd-update'
 	option loglevel '4'
 	option piodir '/tmp/odhcpd-piodir'
-	option hostsdir '/tmp/hosts'
+	option hostsdir '/tmp/hosts
