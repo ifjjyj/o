@@ -15,7 +15,6 @@ config wifi-iface 'default_radio0'
 	option encryption 'sae'
     option ocv '0
     option key '735735735'
-	
 config wifi-device 'radio1'
 	option type 'mac80211'
 	option path 'platform/soc/18000000.wifi+1'
