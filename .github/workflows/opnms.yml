@@ -51,18 +51,33 @@ jobs:
           set -euo pipefail
           NIKKI_BASE="https://nkki.pages.dev"
           OPENWRT_BRANCH="openwrt-${OPENWRT_VERSION%.*}"
-          NIKKI_FEED_URL="${NIKKI_BASE}/${OPENWRT_BRANCH}/${ARCH}/nikki/packages.adb@untrusted"
+          NIKKI_FEED_URL="${NIKKI_BASE}/${OPENWRT_BRANCH}/${ARCH}/nikki/packages.adb"
+          echo ">>> [1/2] 安装 momo 签名公钥..."
           APK_KEYS_DIR=$(find imagebuilder -path "*/apk/keys" -type d | head -1)
-          [ -z "${APK_KEYS_DIR}" ] && APK_KEYS_DIR=$(find imagebuilder -name "keys" -type d | head -1)
-          [ -z "${APK_KEYS_DIR}" ] && { echo "❌ 未找到 keys 目录"; exit 1; }
-          wget -q "${NIKKI_BASE}/public-key.pem" -O "${APK_KEYS_DIR}/nikki.pem" || {
-            echo "❌ nikki 公钥下载失败"; exit 1; 
-          }
-          REPO_CONF=$(find imagebuilder -maxdepth 2 -name "repositories.conf" | head -1)
-          [ -z "${REPO_CONF}" ] && REPO_CONF=$(find imagebuilder -maxdepth 2 -name "repositories*" | head -1)
-          [ -z "${REPO_CONF}" ] && { echo "❌ 未找到 repositories 配置文件"; exit 1; }
-          sed -i '/nikki/d' "${REPO_CONF}"
-          echo "${NIKKI_FEED_URL}" >> "${REPO_CONF}"
+          if [ -z "${APK_KEYS_DIR}" ]; then
+            APK_KEYS_DIR=$(find imagebuilder -name "keys" -type d | head -1)
+          fi
+          if [ -z "${APK_KEYS_DIR}" ]; then
+            echo "❌ 未找到任何 keys 目录"; exit 1
+          fi
+          echo ">>> keys 目录：${APK_KEYS_DIR}"
+          wget -q "${MOMO_BASE}/public-key.pem" \
+               -O "${APK_KEYS_DIR}/nikki.pem"
+          echo ">>> [2/2] 注册 nikki feed..."
+          REPO_CONF=$(find imagebuilder -maxdepth 2 \
+                      -name "repositories.conf" | head -1)
+          if [ -z "${REPO_CONF}" ]; then
+            REPO_CONF=$(find imagebuilder -maxdepth 2 \
+                        -name "repositories*" | head -1)
+          fi
+          if [ -z "${REPO_CONF}" ]; then
+            echo "❌ 未找到 repositories 配置文件"; exit 1
+          fi
+          echo ">>> 配置文件：${REPO_CONF}"
+          echo ">>> feed URL：${MOMO_FEED_URL}"
+          echo "${MOMO_FEED_URL}" >> "${REPO_CONF}"
+          echo ">>> 注册后 repositories 内容："
+          cat "${REPO_CONF}"
           echo ">>> nikki feed 注册完成 ✅"
       - name: 🔌 Setup momo feed
         run: |
