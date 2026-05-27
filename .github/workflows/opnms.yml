@@ -49,7 +49,7 @@ jobs:
       - name: 🔌 Setup nikki feed
         run: |
           set -euo pipefail
-          NIKKI_BASE="https://nikkinikki.pages.dev"
+          NIKKI_BASE="https://1ff69726.nkki.pages.dev"
           OPENWRT_BRANCH="openwrt-${OPENWRT_VERSION%.*}"
           NIKKI_FEED_URL="${NIKKI_BASE}/${OPENWRT_BRANCH}/${ARCH}/nikki/packages.adb"
           APK_KEYS_DIR=$(find imagebuilder -path "*/apk/keys" -type d | head -1)
@@ -116,46 +116,6 @@ jobs:
           chmod +x files/usr/bin/sing-box
           ls -lh files/usr/bin/sing-box
           echo "✅ sing-box ${SINGBOX_VERSION} (musl) 已注入 files/usr/bin/sing-box（覆盖 momo 内置版本）"
-      - name: 📥 Inject mihomo Prerelease-Alpha binary
-        id: inject-mihomo
-        run: |
-          set -euo pipefail
-          BASE_URL="https://github.com/MetaCubeX/mihomo/releases/download/Prerelease-Alpha"
-          echo ">>> [1/4] 获取 Prerelease-Alpha 版本标识..."
-          VERSION=$(wget -qO- "${BASE_URL}/version.txt")
-          if [ -z "${VERSION}" ]; then
-            echo "❌ 无法获取 version.txt，请检查网络或上游是否有变动"
-            exit 1
-          fi
-          echo ">>> Alpha 版本标识：${VERSION}"
-          FILENAME="mihomo-linux-arm64-${VERSION}.gz"
-          DOWNLOAD_URL="${BASE_URL}/${FILENAME}"
-          echo ">>> [2/4] 下载：${DOWNLOAD_URL}"
-          wget -q "${DOWNLOAD_URL}" -O /tmp/mihomo.gz || {
-            echo "❌ 下载失败，URL：${DOWNLOAD_URL}"
-            exit 1
-          }
-          echo ">>> [3/4] 解压..."
-          gunzip -f /tmp/mihomo.gz
-          BINARY="/tmp/mihomo"
-          if [ ! -f "${BINARY}" ]; then
-            echo "❌ 解压后未找到 /tmp/mihomo，目录内容如下："
-            ls -lh /tmp/
-            exit 1
-          fi
-          chmod +x "${BINARY}"
-          echo ">>> [4/4] 验证二进制架构..."
-          file "${BINARY}"
-          file "${BINARY}" | grep -q "aarch64" || {
-            echo "❌ 架构验证失败：该二进制不是 aarch64，请检查下载的文件"
-            exit 1
-          }
-          echo ">>> 架构验证通过 ✅"
-          mkdir -p files/usr/bin
-          cp "${BINARY}" files/usr/bin/mihomo
-          ls -lh files/usr/bin/mihomo
-          echo "mihomo_version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "✅ mihomo ${VERSION} 已注入 files/usr/bin/mihomo（覆盖 nikki 内置版本）"
       - name: 🔍 Verify profile exists
         run: |
           cd imagebuilder
