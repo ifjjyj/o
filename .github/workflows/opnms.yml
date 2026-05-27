@@ -51,7 +51,7 @@ jobs:
           set -euo pipefail
           NIKKI_BASE="https://nkki.pages.dev"
           OPENWRT_BRANCH="openwrt-${OPENWRT_VERSION%.*}"
-          NIKKI_FEED_URL="${NIKKI_BASE}/${OPENWRT_BRANCH}/${ARCH}/nikki/packages.adb"@untrusted
+          NIKKI_FEED_URL="${NIKKI_BASE}/${OPENWRT_BRANCH}/${ARCH}/nikki/packages.adb@untrusted"
           APK_KEYS_DIR=$(find imagebuilder -path "*/apk/keys" -type d | head -1)
           [ -z "${APK_KEYS_DIR}" ] && APK_KEYS_DIR=$(find imagebuilder -name "keys" -type d | head -1)
           [ -z "${APK_KEYS_DIR}" ] && { echo "❌ 未找到 keys 目录"; exit 1; }
