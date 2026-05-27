@@ -53,26 +53,22 @@ jobs:
           OPENWRT_BRANCH="openwrt-${OPENWRT_VERSION%.*}"
           NIKKI_FEED_URL="${NIKKI_BASE}/${OPENWRT_BRANCH}/${ARCH}/nikki/packages.adb"
           echo ">>> [1/2] 安装 nikki 签名公钥..."
-          APK_KEYS_DIR=$(find imagebuilder -path "*/apk/keys" -type d | head -1)
-          if [ -z "${APK_KEYS_DIR}" ]; then
-            APK_KEYS_DIR=$(find imagebuilder -name "keys" -type d | head -1)
-          fi
-          if [ -z "${APK_KEYS_DIR}" ]; then
-            echo "❌ 未找到任何 keys 目录"; exit 1
-          fi
-          echo ">>> keys 目录：${APK_KEYS_DIR}"
-          wget -q "${NIKKI_BASE}/public-key.pem" \
-               -O "${APK_KEYS_DIR}/nikki.pem"
+          wget -q "${NIKKI_BASE}/public-key.pem" -O /tmp/nikki.pem
+          find imagebuilder -name "keys" -type d | while read -r KEYS_DIR; do
+          cp /tmp/nikki.pem "${KEYS_DIR}/nikki.pem"
+          echo ">>> 公钥已安装至：${KEYS_DIR}"
+          done
           echo ">>> [2/2] 注册 nikki feed..."
           REPO_CONF=$(find imagebuilder -maxdepth 2 \
-                      -name "repositories.conf" | head -1)
+                -name "repositories.conf" | head -1)
           if [ -z "${REPO_CONF}" ]; then
-            REPO_CONF=$(find imagebuilder -maxdepth 2 \
-                        -name "repositories*" | head -1)
+          REPO_CONF=$(find imagebuilder -maxdepth 2 \
+                  -name "repositories*" | head -1)
           fi
           if [ -z "${REPO_CONF}" ]; then
-            echo "❌ 未找到 repositories 配置文件"; exit 1
+          echo "❌ 未找到 repositories 配置文件"; exit 1
           fi
+          sed -i '/nikki/d' "${REPO_CONF}"
           echo ">>> 配置文件：${REPO_CONF}"
           echo ">>> feed URL：${NIKKI_FEED_URL}"
           echo "${NIKKI_FEED_URL}" >> "${REPO_CONF}"
