@@ -75,6 +75,18 @@ jobs:
           echo ">>> 注册后 repositories 内容："
           cat "${REPO_CONF}"
           echo ">>> nikki feed 注册完成 ✅"
+          # 调试：列出所有找到的 keys 目录及其内容
+          echo ">>> 所有 keys 目录："
+          find imagebuilder -name "keys" -type d
+          echo ">>> 各目录内容："
+          find imagebuilder -name "keys" -type d | while read -r d; do
+          echo "--- ${d} ---"
+          ls -la "${d}/"
+          done
+          # 调试：确认公钥文件内容有效
+          echo ">>> nikki.pem 内容预览："
+          head -3 /tmp/nikki.pem
+          file /tmp/nikki.pem
       - name: 🔌 Setup momo feed
         run: |
           set -euo pipefail
