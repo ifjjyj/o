@@ -75,7 +75,7 @@ jobs:
           fi
           echo ">>> 配置文件：${REPO_CONF}"
           echo ">>> feed URL：${NIKKI_FEED_URL}"
-          echo "${MOMO_FEED_URL}" >> "${REPO_CONF}"
+          echo "${NIKKI_FEED_URL}" >> "${REPO_CONF}"
           echo ">>> 注册后 repositories 内容："
           cat "${REPO_CONF}"
           echo ">>> nikki feed 注册完成 ✅"
