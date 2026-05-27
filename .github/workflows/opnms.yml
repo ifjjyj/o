@@ -49,7 +49,7 @@ jobs:
       - name: 🔌 Setup nikki feed
         run: |
           set -euo pipefail
-          NIKKI_BASE="https://1ff69726.nkki.pages.dev"
+          NIKKI_BASE="https://nkki.pages.dev"
           OPENWRT_BRANCH="openwrt-${OPENWRT_VERSION%.*}"
           NIKKI_FEED_URL="${NIKKI_BASE}/${OPENWRT_BRANCH}/${ARCH}/nikki/packages.adb"
           APK_KEYS_DIR=$(find imagebuilder -path "*/apk/keys" -type d | head -1)
