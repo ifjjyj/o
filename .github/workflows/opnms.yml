@@ -52,7 +52,7 @@ jobs:
           NIKKI_BASE="https://nkki.pages.dev"
           OPENWRT_BRANCH="openwrt-${OPENWRT_VERSION%.*}"
           NIKKI_FEED_URL="${NIKKI_BASE}/${OPENWRT_BRANCH}/${ARCH}/nikki/packages.adb"
-          echo ">>> [1/2] 安装 momo 签名公钥..."
+          echo ">>> [1/2] 安装 nikki 签名公钥..."
           APK_KEYS_DIR=$(find imagebuilder -path "*/apk/keys" -type d | head -1)
           if [ -z "${APK_KEYS_DIR}" ]; then
             APK_KEYS_DIR=$(find imagebuilder -name "keys" -type d | head -1)
@@ -61,7 +61,7 @@ jobs:
             echo "❌ 未找到任何 keys 目录"; exit 1
           fi
           echo ">>> keys 目录：${APK_KEYS_DIR}"
-          wget -q "${MOMO_BASE}/public-key.pem" \
+          wget -q "${NIKKI_BASE}/public-key.pem" \
                -O "${APK_KEYS_DIR}/nikki.pem"
           echo ">>> [2/2] 注册 nikki feed..."
           REPO_CONF=$(find imagebuilder -maxdepth 2 \
@@ -74,7 +74,7 @@ jobs:
             echo "❌ 未找到 repositories 配置文件"; exit 1
           fi
           echo ">>> 配置文件：${REPO_CONF}"
-          echo ">>> feed URL：${MOMO_FEED_URL}"
+          echo ">>> feed URL：${NIKKI_FEED_URL}"
           echo "${MOMO_FEED_URL}" >> "${REPO_CONF}"
           echo ">>> 注册后 repositories 内容："
           cat "${REPO_CONF}"
