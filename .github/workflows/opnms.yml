@@ -51,17 +51,27 @@ jobs:
           set -euo pipefail
           NIKKI_BASE="https://nkki.pages.dev"
           OPENWRT_BRANCH="openwrt-${OPENWRT_VERSION%.*}"
-          NIKKI_FEED_URL="${NIKKI_BASE}/${OPENWRT_BRANCH}/${ARCH}/nikki/packages.adb"
+          # 【修复点1】: 移除 /packages.adb，只保留到包所在的目录层级
+          NIKKI_FEED_URL="${NIKKI_BASE}/${OPENWRT_BRANCH}/${ARCH}/nikki"
+          # 寻找 keys 目录
           APK_KEYS_DIR=$(find imagebuilder -path "*/apk/keys" -type d | head -1)
           [ -z "${APK_KEYS_DIR}" ] && APK_KEYS_DIR=$(find imagebuilder -name "keys" -type d | head -1)
           [ -z "${APK_KEYS_DIR}" ] && { echo "❌ 未找到 keys 目录"; exit 1; }
+          # 下载公钥
           wget -q "${NIKKI_BASE}/public-key.pem" -O "${APK_KEYS_DIR}/nikki.pem" || {
-            echo "❌ nikki 公钥下载失败"; exit 1; }
+            echo "❌ nikki 公钥下载失败"; exit 1; 
+          }
+          # 定位 repositories 配置文件
           REPO_CONF=$(find imagebuilder -maxdepth 2 -name "repositories.conf" | head -1)
           [ -z "${REPO_CONF}" ] && REPO_CONF=$(find imagebuilder -maxdepth 2 -name "repositories*" | head -1)
           [ -z "${REPO_CONF}" ] && { echo "❌ 未找到 repositories 配置文件"; exit 1; }
+          # 【修复点2】: 清理原有配置中可能存在的其他 nikki 源，防止冲突
+          sed -i '/nikki/d' "${REPO_CONF}"
+          # 注入你的自定义源
           echo "${NIKKI_FEED_URL}" >> "${REPO_CONF}"
           echo ">>> nikki feed 注册完成 ✅"
+          # 可选：打印出来确认一下内容是否正确
+          cat "${REPO_CONF}"
       - name: 🔌 Setup momo feed
         run: |
           set -euo pipefail
