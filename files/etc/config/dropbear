@@ -1,5 +1,5 @@
 config dropbear 'main'
-	option enable '1'
 	option PasswordAuth 'on'
-	option RootPasswordAuth 'on'
 	option Port '34566'
+	option _direct '1'
+	option DirectInterface 'lan'
