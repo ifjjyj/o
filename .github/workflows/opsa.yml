@@ -1,4 +1,4 @@
-name: 360T7 opsa
+name: 360T7
 on:
   workflow_dispatch:
 env:
@@ -17,6 +17,7 @@ jobs:
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v6
+
       - name: 🔧 Install dependencies
         run: |
           sudo apt-get update -qq
@@ -25,12 +26,14 @@ jobs:
             gettext libssl-dev xsltproc rsync wget unzip python3 \
             qemu-utils u-boot-tools squashfs-tools device-tree-compiler \
             fakeroot
+
       - name: 💾 Cache ImageBuilder
         id: cache-imagebuilder
         uses: actions/cache@v5
         with:
           path: imagebuilder
           key: imagebuilder-${{ env.OPENWRT_VERSION }}-mediatek-filogic
+
       - name: 📦 Download ImageBuilder (cache miss only)
         if: steps.cache-imagebuilder.outputs.cache-hit != 'true'
         run: |
@@ -39,6 +42,7 @@ jobs:
             "https://downloads.openwrt.org/releases/${OPENWRT_VERSION}/targets/${TARGET}/${BUILDER}.tar.zst"
           tar --zstd -xf "${BUILDER}.tar.zst"
           mv "${BUILDER}" imagebuilder
+
       - name: ✔️ Confirm ImageBuilder ready
         run: |
           if [ "${{ steps.cache-imagebuilder.outputs.cache-hit }}" = "true" ]; then
@@ -46,6 +50,10 @@ jobs:
           else
             echo "✅ ImageBuilder 新鲜下载（版本 ${OPENWRT_VERSION}）"
           fi
+
+      - name: 🧹 Clean previous build artifacts
+        run: rm -rf imagebuilder/bin
+
       - name: 🔌 Setup momo feed
         run: |
           set -euo pipefail
@@ -80,6 +88,7 @@ jobs:
           echo ">>> 注册后 repositories 内容："
           cat "${REPO_CONF}"
           echo ">>> momo feed 注册完成 ✅"
+
       - name: 📥 Inject sing-box ${{ env.SINGBOX_VERSION }} binary
         run: |
           set -euo pipefail
@@ -100,6 +109,7 @@ jobs:
           chmod +x files/usr/bin/sing-box
           ls -lh files/usr/bin/sing-box
           echo "✅ sing-box ${SINGBOX_VERSION} (musl) 已注入 files/usr/bin/sing-box（覆盖 momo 内置版本）"
+
       - name: 🔍 Verify profile exists
         run: |
           cd imagebuilder
@@ -107,17 +117,18 @@ jobs:
             echo "❌ Profile '${PROFILE}' 不存在"
             make info
             exit 1; }
+
       - name: 🏷️ Generate release tag
         id: tag
         run: |
-          DATETIME=$(date -u '+%Y%m%d')
-          RUN_NUM="${{ github.run_number }}"
-          TAG="${DATETIME}-${RUN_NUM}"
-          FILENAME="openwrt-${OPENWRT_VERSION}-360t7-opnms-${TAG}.itb"
+          DATETIME=$(TZ='Asia/Shanghai' date '+%Y%m%d%H%M')
+          TAG="openwrt-${OPENWRT_VERSION}-360t7-ubi-${DATETIME}"
+          FILENAME="${TAG}.itb"
           echo "tag=${TAG}"           >> "$GITHUB_OUTPUT"
           echo "filename=${FILENAME}" >> "$GITHUB_OUTPUT"
           echo ">>> Release tag: ${TAG}"
           echo ">>> Firmware filename: ${FILENAME}"
+
       - name: 🏗️ Build firmware
         run: |
           set -euo pipefail
@@ -128,7 +139,7 @@ jobs:
           printf '#!/bin/sh\nexec "%s" --allow-untrusted "$@"\n' "${APK_REAL}" > /tmp/apk-wrapper/apk
           chmod +x /tmp/apk-wrapper/apk
           export PATH="/tmp/apk-wrapper:${PATH}"
-          echo ">>> 开始构建固件，时间: $(date)"
+          echo ">>> 开始构建固件，时间: $(TZ='Asia/Shanghai' date)"
           make image \
             APK="/tmp/apk-wrapper/apk" \
             PROFILE="${PROFILE}" \
@@ -139,7 +150,7 @@ jobs:
               luci-i18n-momo-zh-cn" \
             FILES="../files"
           OUTDIR="bin/targets/mediatek/filogic"
-          ORIG_NAME="openwrt-${OPENWRT_VERSION}-mediatek-filogic-qihoo_360t7-squashfs-sysupgrade.itb"
+          ORIG_NAME="openwrt-${OPENWRT_VERSION}-mediatek-filogic-${PROFILE}-squashfs-sysupgrade.itb"
           SHORT_NAME="${{ steps.tag.outputs.filename }}"
           if [ -f "${OUTDIR}/${ORIG_NAME}" ]; then
             mv "${OUTDIR}/${ORIG_NAME}" "${OUTDIR}/${SHORT_NAME}"
@@ -150,15 +161,17 @@ jobs:
             ls -lh "${OUTDIR}/"
             exit 1
           fi
+
       - name: ✅ Verify output
         run: |
           cd imagebuilder
           OUTDIR="bin/targets/mediatek/filogic"
-          SYSUPGRADE=$(ls "${OUTDIR}"/*.itb 2>/dev/null | head -1)
-          [ -z "${SYSUPGRADE}" ] && { echo "❌ 未找到固件"; exit 1; }
+          SYSUPGRADE="${OUTDIR}/${{ steps.tag.outputs.filename }}"
+          [ ! -f "${SYSUPGRADE}" ] && { echo "❌ 未找到固件：${SYSUPGRADE}"; ls -lh "${OUTDIR}/"; exit 1; }
           ls -lh "${OUTDIR}/"
           cat "${OUTDIR}/sha256sums"
           echo "✅ 固件构建成功：$(basename "${SYSUPGRADE}")"
+
       - name: 📝 Generate release notes
         id: notes
         run: |
@@ -168,8 +181,7 @@ jobs:
           FIRMWARE="${OUTDIR}/${FILENAME}"
           SHA256=$(grep "${FILENAME}" "${OUTDIR}/sha256sums" | awk '{print $1}')
           FILESIZE=$(ls -lh "${FIRMWARE}" | awk '{print $5}')
-          BUILD_TIME=$(date -u '+%Y-%m-%d %H:%M UTC')
-          MIHOMO_VER="${{ steps.inject-mihomo.outputs.mihomo_version }}"
+          BUILD_TIME=$(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M CST')
           cat > /tmp/release_notes.md << EOF
           ### 固件信息
           | 项目 | 值 |
@@ -181,11 +193,12 @@ jobs:
           | SHA256 | \`${SHA256}\` |
           EOF
           echo "notes_file=/tmp/release_notes.md" >> "$GITHUB_OUTPUT"
+
       - name: 🚀 Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
-          name: "OpenWrt ${{ env.OPENWRT_VERSION }} for 360T7 · ${{ steps.tag.outputs.tag }}"
+          name: ${{ steps.tag.outputs.tag }}
           body_path: ${{ steps.notes.outputs.notes_file }}
           draft: false
           prerelease: false
