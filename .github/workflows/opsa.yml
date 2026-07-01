@@ -122,7 +122,7 @@ jobs:
         id: tag
         run: |
           DATETIME=$(TZ='Asia/Shanghai' date '+%Y%m%d%H%M')
-          TAG="openwrt-${OPENWRT_VERSION}-360t7-ubi-${DATETIME}"
+          TAG="openwrt-${OPENWRT_VERSION}-${PROFILE}-${DATETIME}"
           FILENAME="${TAG}.itb"
           echo "tag=${TAG}"           >> "$GITHUB_OUTPUT"
           echo "filename=${FILENAME}" >> "$GITHUB_OUTPUT"
