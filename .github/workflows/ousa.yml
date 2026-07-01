@@ -51,7 +51,6 @@ jobs:
             echo "✅ ImageBuilder 新鲜下载（版本 ${OPENWRT_VERSION}）"
           fi
 
-      # ✅ FIX 3: 每次构建前清理旧产物，避免缓存残留干扰
       - name: 🧹 Clean previous build artifacts
         run: rm -rf imagebuilder/bin
 
@@ -109,7 +108,7 @@ jobs:
           cp "${BINARY}" files/usr/bin/sing-box
           chmod +x files/usr/bin/sing-box
           ls -lh files/usr/bin/sing-box
-          echo "✅ sing-box ${SINGBOX_VERSION} (musl) 已注入 files/usr/bin/sing-box"
+          echo "✅ sing-box ${SINGBOX_VERSION} (musl) 已注入 files/usr/bin/sing-box（覆盖 momo 内置版本）"
 
       - name: 🔍 Verify profile exists
         run: |
@@ -122,8 +121,7 @@ jobs:
       - name: 🏷️ Generate release tag
         id: tag
         run: |
-          # ✅ FIX 1: 正确定义 TAG；FIX 2: 使用 %H%M（小时分钟）替代错误的 %h%m
-          DATETIME=$(date -u '+%Y%m%d%H%M')
+          DATETIME=$(TZ='Asia/Shanghai' date '+%Y%m%d%H%M')
           TAG="openwrt-${OPENWRT_VERSION}-360t7-ubi-${DATETIME}"
           FILENAME="${TAG}.itb"
           echo "tag=${TAG}"           >> "$GITHUB_OUTPUT"
@@ -141,7 +139,7 @@ jobs:
           printf '#!/bin/sh\nexec "%s" --allow-untrusted "$@"\n' "${APK_REAL}" > /tmp/apk-wrapper/apk
           chmod +x /tmp/apk-wrapper/apk
           export PATH="/tmp/apk-wrapper:${PATH}"
-          echo ">>> 开始构建固件，时间: $(date)"
+          echo ">>> 开始构建固件，时间: $(TZ='Asia/Shanghai' date)"
           make image \
             APK="/tmp/apk-wrapper/apk" \
             PROFILE="${PROFILE}" \
@@ -168,7 +166,6 @@ jobs:
         run: |
           cd imagebuilder
           OUTDIR="bin/targets/mediatek/filogic"
-          # ✅ FIX 3: 直接验证目标文件，不用 ls | head -1 猜测
           SYSUPGRADE="${OUTDIR}/${{ steps.tag.outputs.filename }}"
           [ ! -f "${SYSUPGRADE}" ] && { echo "❌ 未找到固件：${SYSUPGRADE}"; ls -lh "${OUTDIR}/"; exit 1; }
           ls -lh "${OUTDIR}/"
@@ -184,7 +181,7 @@ jobs:
           FIRMWARE="${OUTDIR}/${FILENAME}"
           SHA256=$(grep "${FILENAME}" "${OUTDIR}/sha256sums" | awk '{print $1}')
           FILESIZE=$(ls -lh "${FIRMWARE}" | awk '{print $5}')
-          BUILD_TIME=$(date -u '+%Y-%m-%d %H:%M UTC')
+          BUILD_TIME=$(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M CST')
           cat > /tmp/release_notes.md << EOF
           ### 固件信息
           | 项目 | 值 |
@@ -201,7 +198,7 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
-          name: "OpenWrt ${{ env.OPENWRT_VERSION }} for 360T7 · ${{ steps.tag.outputs.tag }}"
+          name: ${{ steps.tag.outputs.tag }}
           body_path: ${{ steps.notes.outputs.notes_file }}
           draft: false
           prerelease: false
