@@ -17,6 +17,7 @@ jobs:
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v6
+
       - name: 🔧 Install dependencies
         run: |
           sudo apt-get update -qq
@@ -25,12 +26,14 @@ jobs:
             gettext libssl-dev xsltproc rsync wget unzip python3 \
             qemu-utils u-boot-tools squashfs-tools device-tree-compiler \
             fakeroot
+
       - name: 💾 Cache ImageBuilder
         id: cache-imagebuilder
         uses: actions/cache@v5
         with:
           path: imagebuilder
           key: imagebuilder-${{ env.OPENWRT_VERSION }}-mediatek-filogic
+
       - name: 📦 Download ImageBuilder (cache miss only)
         if: steps.cache-imagebuilder.outputs.cache-hit != 'true'
         run: |
@@ -39,6 +42,7 @@ jobs:
             "https://downloads.openwrt.org/releases/${OPENWRT_VERSION}/targets/${TARGET}/${BUILDER}.tar.zst"
           tar --zstd -xf "${BUILDER}.tar.zst"
           mv "${BUILDER}" imagebuilder
+
       - name: ✔️ Confirm ImageBuilder ready
         run: |
           if [ "${{ steps.cache-imagebuilder.outputs.cache-hit }}" = "true" ]; then
@@ -46,6 +50,11 @@ jobs:
           else
             echo "✅ ImageBuilder 新鲜下载（版本 ${OPENWRT_VERSION}）"
           fi
+
+      # ✅ FIX 3: 每次构建前清理旧产物，避免缓存残留干扰
+      - name: 🧹 Clean previous build artifacts
+        run: rm -rf imagebuilder/bin
+
       - name: 🔌 Setup momo feed
         run: |
           set -euo pipefail
@@ -80,6 +89,7 @@ jobs:
           echo ">>> 注册后 repositories 内容："
           cat "${REPO_CONF}"
           echo ">>> momo feed 注册完成 ✅"
+
       - name: 📥 Inject sing-box ${{ env.SINGBOX_VERSION }} binary
         run: |
           set -euo pipefail
@@ -99,7 +109,8 @@ jobs:
           cp "${BINARY}" files/usr/bin/sing-box
           chmod +x files/usr/bin/sing-box
           ls -lh files/usr/bin/sing-box
-          echo "✅ sing-box ${SINGBOX_VERSION} (musl) 已注入 files/usr/bin/sing-box（覆盖 momo 内置版本）"
+          echo "✅ sing-box ${SINGBOX_VERSION} (musl) 已注入 files/usr/bin/sing-box"
+
       - name: 🔍 Verify profile exists
         run: |
           cd imagebuilder
@@ -107,15 +118,19 @@ jobs:
             echo "❌ Profile '${PROFILE}' 不存在"
             make info
             exit 1; }
+
       - name: 🏷️ Generate release tag
         id: tag
         run: |
-          DATETIME=$(date -u '+%Y%m%d%h%m')
-          FILENAME="openwrt-${OPENWRT_VERSION}-360t7-ubi-${DATETIME}.itb"
+          # ✅ FIX 1: 正确定义 TAG；FIX 2: 使用 %H%M（小时分钟）替代错误的 %h%m
+          DATETIME=$(date -u '+%Y%m%d%H%M')
+          TAG="openwrt-${OPENWRT_VERSION}-360t7-ubi-${DATETIME}"
+          FILENAME="${TAG}.itb"
           echo "tag=${TAG}"           >> "$GITHUB_OUTPUT"
           echo "filename=${FILENAME}" >> "$GITHUB_OUTPUT"
-          echo ">>> Release tag: ${DATETIME}"
+          echo ">>> Release tag: ${TAG}"
           echo ">>> Firmware filename: ${FILENAME}"
+
       - name: 🏗️ Build firmware
         run: |
           set -euo pipefail
@@ -148,15 +163,18 @@ jobs:
             ls -lh "${OUTDIR}/"
             exit 1
           fi
+
       - name: ✅ Verify output
         run: |
           cd imagebuilder
           OUTDIR="bin/targets/mediatek/filogic"
-          SYSUPGRADE=$(ls "${OUTDIR}"/*.itb 2>/dev/null | head -1)
-          [ -z "${SYSUPGRADE}" ] && { echo "❌ 未找到固件"; exit 1; }
+          # ✅ FIX 3: 直接验证目标文件，不用 ls | head -1 猜测
+          SYSUPGRADE="${OUTDIR}/${{ steps.tag.outputs.filename }}"
+          [ ! -f "${SYSUPGRADE}" ] && { echo "❌ 未找到固件：${SYSUPGRADE}"; ls -lh "${OUTDIR}/"; exit 1; }
           ls -lh "${OUTDIR}/"
           cat "${OUTDIR}/sha256sums"
           echo "✅ 固件构建成功：$(basename "${SYSUPGRADE}")"
+
       - name: 📝 Generate release notes
         id: notes
         run: |
@@ -178,6 +196,7 @@ jobs:
           | SHA256 | \`${SHA256}\` |
           EOF
           echo "notes_file=/tmp/release_notes.md" >> "$GITHUB_OUTPUT"
+
       - name: 🚀 Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
