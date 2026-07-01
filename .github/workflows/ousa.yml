@@ -110,13 +110,11 @@ jobs:
       - name: 🏷️ Generate release tag
         id: tag
         run: |
-          DATETIME=$(date -u '+%Y%m%d')
-          RUN_NUM="${{ github.run_number }}"
-          TAG="${DATETIME}-${RUN_NUM}"
-          FILENAME="openwrt-${OPENWRT_VERSION}-360t7-opnms-${TAG}.itb"
+          DATETIME=$(date -u '+%Y%m%d%h%m')
+          FILENAME="openwrt-${OPENWRT_VERSION}-360t7-ubi-${DATETIME}.itb"
           echo "tag=${TAG}"           >> "$GITHUB_OUTPUT"
           echo "filename=${FILENAME}" >> "$GITHUB_OUTPUT"
-          echo ">>> Release tag: ${TAG}"
+          echo ">>> Release tag: ${DATETIME}"
           echo ">>> Firmware filename: ${FILENAME}"
       - name: 🏗️ Build firmware
         run: |
@@ -169,7 +167,6 @@ jobs:
           SHA256=$(grep "${FILENAME}" "${OUTDIR}/sha256sums" | awk '{print $1}')
           FILESIZE=$(ls -lh "${FIRMWARE}" | awk '{print $5}')
           BUILD_TIME=$(date -u '+%Y-%m-%d %H:%M UTC')
-          MIHOMO_VER="${{ steps.inject-mihomo.outputs.mihomo_version }}"
           cat > /tmp/release_notes.md << EOF
           ### 固件信息
           | 项目 | 值 |
