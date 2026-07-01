@@ -139,7 +139,7 @@ jobs:
               luci-i18n-momo-zh-cn" \
             FILES="../files"
           OUTDIR="bin/targets/mediatek/filogic"
-          ORIG_NAME="openwrt-${OPENWRT_VERSION}-mediatek-filogic-qihoo_360t7-squashfs-sysupgrade.itb"
+          ORIG_NAME="openwrt-${OPENWRT_VERSION}-mediatek-filogic-${PROFILE}-squashfs-sysupgrade.itb"
           SHORT_NAME="${{ steps.tag.outputs.filename }}"
           if [ -f "${OUTDIR}/${ORIG_NAME}" ]; then
             mv "${OUTDIR}/${ORIG_NAME}" "${OUTDIR}/${SHORT_NAME}"
