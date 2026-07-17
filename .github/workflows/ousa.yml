@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
 env:
   OPENWRT_VERSION: "25.12.5"
-  SINGBOX_VERSION: "1.14.0-alpha.44"
+  SINGBOX_VERSION: "1.14.0-alpha.45"
   TARGET: "mediatek/filogic"
   PROFILE: "qihoo_360t7-ubi"
   ARCH: "aarch64_cortex-a53"
