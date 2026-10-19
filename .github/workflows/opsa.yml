@@ -2,7 +2,7 @@ name: 360T7
 on:
   workflow_dispatch:
 env:
-  OPENWRT_VERSION: "25.12.5"
+  OPENWRT_VERSION: "25.12.6"
   SINGBOX_VERSION: "1.14.3"
   TARGET: "mediatek/filogic"
   PROFILE: "qihoo_360t7"
