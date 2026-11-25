@@ -1,3 +1,4 @@
+
 config interface 'loopback'
 	option device 'lo'
 	option proto 'static'
@@ -5,9 +6,8 @@ config interface 'loopback'
 
 config globals 'globals'
 	option dhcp_default_duid '00043a40c388a67948ceaacec60d9a39f0a6'
-	option packet_steering '1'
+	option packet_steering '2'
 	option steering_flows '128'
-	option ula_prefix 'fd00::/8'
 
 config device
 	option name 'br-lan'
@@ -51,3 +51,4 @@ config interface 'wan6'
 	option norelease '1'
 	option multipath 'off'
 	option sendclientid 'auto'
+
